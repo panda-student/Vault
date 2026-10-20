@@ -1,0 +1,42 @@
+[package]
+name = "local-password-manager"
+version = "0.3.0"
+description = "Portable Windows password and API credential manager"
+edition = "2024"
+rust-version = "1.90"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "=2.12.4", default-features = false, features = ["wry", "compression", "common-controls-v6", "tray-icon"] }
+tauri-plugin-clipboard-manager = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rmcp = { version = "=3.5.1", default-features = false, features = ["server", "transport-io"] }
+tokio = { version = "1", features = ["rt", "io-std", "io-util", "time"] }
+rusqlite = { version = "=0.40.2", features = ["bundled"] }
+aes-gcm = { version = "=0.10.3", features = ["zeroize"] }
+getrandom = "0.4"
+zeroize = "1"
+uuid = { version = "1", features = ["v4"] }
+winreg = "0.56"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
+windows = { version = "0.62", features = ["Win32_UI_Accessibility", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Threading", "Win32_Storage_FileSystem"] }
+base64 = "0.22"
+percent-encoding = "2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+default = []
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+panic = "abort"
+strip = true
+lto = true
+codegen-units = 1
+opt-level = "s"

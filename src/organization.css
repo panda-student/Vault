@@ -1,0 +1,40 @@
+.sidebar{width:184px;min-height:0;overflow:hidden;padding:20px 10px}
+.brand{flex-shrink:0;padding-bottom:22px}
+.nav-scroll{flex:1;min-height:0;overflow:auto}
+.nav-heading{display:flex;align-items:center;justify-content:space-between;margin:17px 10px 5px;color:#687387;font-size:11px}
+.nav-line{display:flex;align-items:center;min-width:0}
+.nav-line .nav{flex:1;min-width:0;overflow-wrap:anywhere}
+.nav-line>.text-btn{flex-shrink:0;padding:5px}
+.nav{padding:9px 10px;font-size:12px;gap:6px}
+.sidebar-bottom{flex-shrink:0;padding-top:12px}
+.local-label{margin:8px 3px 0;padding-top:12px;font-size:11px;line-height:1.7}
+.local-label small{font-size:10px;margin-top:4px}
+.list-pane{width:285px}
+.list-filters{margin:0 17px 12px}
+.list-filters select{width:100%;height:32px;border:1px solid #dce1eb;border-radius:6px;background:white;color:#596375}
+.chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;min-width:0}
+.chip{font-size:10px;color:#53648c;background:#edf0fa;border:0;border-radius:4px;padding:3px 6px;overflow-wrap:anywhere;max-width:100%}
+.group-heading{display:flex;align-items:center;margin-top:10px;gap:3px}
+.group-toggle{flex:1;min-width:0;text-align:left;overflow-wrap:anywhere}
+.entry-select{padding:12px 8px;gap:8px}
+.entry-select .logo{width:29px;height:29px;font-size:11px}
+.entry-text small{margin-top:5px}
+.detail-toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.detail-toolbar .secondary{font-size:11px;padding:6px 9px}
+.inline-editor select{width:100%}
+.host-fields{display:grid;grid-template-columns:minmax(0,1fr) 85px;gap:12px}
+.service-controls{grid-template-columns:110px minmax(0,1fr) 30px 30px}
+.trash-panel{max-width:none}
+.trash-heading{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:24px}
+.trash-heading button{flex-shrink:0}
+.trash-entry{display:flex;align-items:center;justify-content:space-between;gap:18px}
+.trash-entry>div{min-width:0;overflow-wrap:anywhere}
+.trash-entry .metadata{margin-top:10px}
+.trash-entry>button{flex-shrink:0}
+.toast{top:12px;bottom:auto;pointer-events:none}
+@media(max-width:1000px){
+  .sidebar{width:158px;padding:18px 7px}.list-pane{width:236px}
+  .local-label{font-size:10px}.local-label small{font-size:9px}
+  .service-controls{grid-template-columns:96px minmax(0,1fr) 28px 28px}
+  .identity-fields{grid-template-columns:1fr 1fr;gap:10px}
+}
