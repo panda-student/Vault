@@ -31,7 +31,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-          cache-on-failure: false
+          cache-on-failure: true
       - name: Install frontend dependencies
         run: npm ci
       - name: Verify version consistency
@@ -47,13 +47,25 @@ jobs:
           node scripts/generate-notices.mjs
       - name: Desktop build
         run: npm run desktop:build
+      - name: Download pinned migration fixture
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifacts/migration-fixture | Out-Null
+          Invoke-WebRequest 'https://github.com/panda-student/local-password-manager/releases/download/v0.3.0/vault-0.3.0.zip' -OutFile artifacts/migration-fixture/vault-0.3.0.zip
+          $hash = (Get-FileHash artifacts/migration-fixture/vault-0.3.0.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne 'fa5412693b58c9efb7b673699e82c4579d0110ca7786f84474b8de3973fad2ff') { throw 'Migration fixture checksum mismatch.' }
+          Expand-Archive artifacts/migration-fixture/vault-0.3.0.zip artifacts/migration-fixture/unpacked
       - name: MCP and migration acceptance
         env:
           VAULT_EXE: src-tauri/target/release/local-password-manager.exe
+          VAULT_OLD_EXE: artifacts/migration-fixture/unpacked/vault-0.3.0/Vault.exe
         run: |
           npm run verify:integration
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run verify:permissions
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run verify:migration
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Package portable build
         run: npm run package:portable
       - name: Preserve short-lived build artifacts
