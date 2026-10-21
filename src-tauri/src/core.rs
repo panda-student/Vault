@@ -23,15 +23,19 @@ mod permissions;
 mod storage;
 #[cfg(test)]
 mod tests;
+mod updater;
 mod windows;
+pub use updater::{UpdateRuntime, apply_update};
 
 struct CoreService {
+    updater: updater::UpdateService,
     storage: storage::StorageService,
     filling: filling::FillingService,
     windows: windows::WindowsService,
     permissions: permissions::PermissionService,
 }
 pub struct CoreSession {
+    execution_gate: RwLock<()>,
     service: CoreService,
     caller: permissions::Caller,
     guard: SharedGuard,
@@ -39,7 +43,9 @@ pub struct CoreSession {
 /// Bootstrap-only binding. Client payloads never reach this function.
 pub fn open(directory: &Path, mcp_mode: bool) -> Result<Arc<CoreSession>> {
     Ok(Arc::new(CoreSession {
+        execution_gate: RwLock::new(()),
         service: CoreService {
+            updater: Default::default(),
             storage: storage::StorageService::open(directory)?,
             filling: Default::default(),
             windows: Default::default(),
@@ -98,12 +104,8 @@ fn guard_organize(
         if !entry.tags.iter().any(|t| t == old) {
             continue;
         }
-        let mut renamed_tags: Vec<String> = entry
-            .tags
-            .iter()
-            .filter(|t| *t != old)
-            .cloned()
-            .collect();
+        let mut renamed_tags: Vec<String> =
+            entry.tags.iter().filter(|t| *t != old).cloned().collect();
         if renaming && !renamed_tags.iter().any(|t| t == name) {
             renamed_tags.push(name.to_string());
         }
@@ -121,6 +123,10 @@ fn guard_organize(
     Ok(())
 }
 impl CoreSession {
+    /// Bootstrap only; all process modes must acquire the lease before opening storage.
+    pub fn bind_update_runtime(&self, runtime: Arc<UpdateRuntime>) -> Result<()> {
+        self.service.updater.bind(runtime)
+    }
     /// Bootstrap capability binding, not an operation available to client payloads.
     pub fn bind_clipboard(&self, port: Arc<dyn ClipboardPort>) -> Result<()> {
         self.service.permissions.authorize_operation(
@@ -168,6 +174,31 @@ impl CoreSession {
         serde_json::from_value(self.execute(operation)?).map_err(|_| AppError::storage())
     }
     pub fn execute(&self, operation: Operation) -> Result<Value> {
+        let installing = matches!(&operation, Operation::InstallUpdate);
+        let _exclusive = if installing {
+            Some(
+                self.execution_gate
+                    .write()
+                    .map_err(|_| AppError::storage())?,
+            )
+        } else {
+            None
+        };
+        let _shared = if !installing {
+            Some(
+                self.execution_gate
+                    .read()
+                    .map_err(|_| AppError::storage())?,
+            )
+        } else {
+            None
+        };
+        if self.service.updater.installing() && !matches!(&operation, Operation::UpdateStatus) {
+            return Err(AppError::new(
+                "UPDATE_IN_PROGRESS",
+                "程序正在退出以完成更新。",
+            ));
+        }
         let storage = &self.service.storage;
         self.service.permissions.authorize_operation(
             self.caller,
@@ -196,6 +227,22 @@ impl CoreSession {
             }
         }
         let result = match operation {
+            Operation::UpdateStatus => encoded(self.service.updater.status()?),
+            Operation::CheckUpdate => encoded(self.service.updater.check()?),
+            Operation::DownloadUpdate => encoded(self.service.updater.download()?),
+            Operation::CancelUpdate => {
+                self.service.updater.cancel();
+                Ok(Value::Null)
+            }
+            Operation::InstallUpdate => {
+                let launch = self.service.updater.prepare_install(self.directory())?;
+                if let Err(error) = self.service.windows.launch_update(launch) {
+                    self.service.updater.launch_failed();
+                    return Err(error);
+                }
+                self.service.updater.launched();
+                Ok(Value::Null)
+            }
             Operation::McpConfig => {
                 let executable = std::env::current_exe().map_err(|_| {
                     AppError::new(

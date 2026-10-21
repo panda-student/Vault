@@ -1,11 +1,66 @@
 //! Windows capability service: startup integration and native human confirmation.
 use super::*;
 use std::path::Path;
+pub(super) struct UpdateLaunch {
+    pub helper: std::path::PathBuf,
+    pub plan: std::path::PathBuf,
+}
+pub(super) fn wait_for_process(pid: u32) -> Result<()> {
+    use ::windows::Win32::{
+        Foundation::CloseHandle,
+        System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject},
+    };
+    let process = match unsafe { OpenProcess(PROCESS_SYNCHRONIZE, false, pid) } {
+        Ok(process) => process,
+        Err(error) if error.code().0 as u32 == 0x80070057 => return Ok(()),
+        Err(_) => {
+            return Err(AppError::new(
+                "UPDATE_PARENT",
+                "无法等待旧程序退出，未执行更新。",
+            ));
+        }
+    };
+    let result = unsafe { WaitForSingleObject(process, 30000) };
+    let _ = unsafe { CloseHandle(process) };
+    if result.0 != 0 {
+        return Err(AppError::new(
+            "UPDATE_PARENT",
+            "旧程序未能及时退出，未执行更新。",
+        ));
+    }
+    Ok(())
+}
+pub(super) fn start_updated(
+    executable: &Path,
+    directory: &Path,
+    health: Option<(&Path, &str)>,
+) -> Result<std::process::Child> {
+    use std::os::windows::process::CommandExt;
+    let mut command = std::process::Command::new(executable);
+    command.args([std::ffi::OsStr::new("--data-dir"), directory.as_os_str()]);
+    if let Some((path, token)) = health {
+        command.arg("--update-health").arg(path).arg(token);
+    }
+    command
+        .creation_flags(0x08000000)
+        .spawn()
+        .map_err(|_| AppError::new("UPDATE_START", "无法启动新版程序。"))
+}
 #[derive(Default)]
 pub(super) struct WindowsService {
     clipboard: std::sync::RwLock<Option<std::sync::Arc<dyn ClipboardPort>>>,
 }
 impl WindowsService {
+    pub fn launch_update(&self, launch: UpdateLaunch) -> Result<()> {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new(launch.helper)
+            .arg("--apply-update")
+            .arg(launch.plan)
+            .creation_flags(0x08000000)
+            .spawn()
+            .map_err(|_| AppError::new("UPDATE_START", "无法启动更新辅助进程，旧程序继续运行。"))?;
+        Ok(())
+    }
     pub fn bind_clipboard(&self, port: std::sync::Arc<dyn ClipboardPort>) -> Result<()> {
         *self.clipboard.write().map_err(|_| AppError::storage())? = Some(port);
         Ok(())

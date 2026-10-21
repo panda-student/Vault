@@ -15,6 +15,8 @@
 !/src-tauri/
 !/scripts/
 !/docs/
+!/.github/
+!/.github/workflows/
 
 /src-tauri/*
 !/src-tauri/src/
@@ -24,6 +26,7 @@
 !/src-tauri/Cargo.lock
 !/src-tauri/build.rs
 !/src-tauri/tauri.conf.json
+!/src-tauri/update-public-key.txt
 
 /scripts/*
 !/scripts/tauri.mjs
@@ -39,6 +42,9 @@
 !/scripts/ui-audit-host.mjs
 !/scripts/ui-window.ps1
 !/scripts/generate-notices.mjs
+!/scripts/update-release.mjs
+!/scripts/setup-updater.ps1
+!/scripts/verify-update.mjs
 
 /docs/*
 !/docs/licenses/
@@ -47,6 +53,7 @@
 !/docs/PORTABLE-README.txt
 !/docs/RELEASE.md
 !/docs/ARCHITECTURE.md
+!/docs/UPDATES.md
 !/docs/prototypes/
 /docs/prototypes/*
 !/docs/prototypes/vault.html

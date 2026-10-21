@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { toRefs, ref } from 'vue';
 import PermissionsPanel from './PermissionsPanel.vue';
+import UpdatePanel from './UpdatePanel.vue';
+import thirdPartyNotices from '../../THIRD_PARTY_NOTICES.txt?raw';
 import type { UnwrapRef } from 'vue';
 import type { VaultUI } from '../useVault';
 const props = defineProps<{ v: UnwrapRef<VaultUI> }>();
 const { info, configVisible, config, settingsSaving } = toRefs(props.v);
 const { updateSettings, toggleStartup, copyConfig } = props.v;
 const tab=ref<'connection'|'permissions'>('permissions');
+const licenses=ref<HTMLDialogElement|null>(null);
 </script>
 <template>
   <section class="settings" :class="{'mcp-settings':v.page==='mcp'}">
@@ -38,10 +41,14 @@ const tab=ref<'connection'|'permissions'>('permissions');
         <div class="setting-row"><span>保护方式</span><span class="pill">本地加密 · Windows 用户身份</span></div>
         <div class="setting-row vertical"><span>数据目录</span><code id="data-directory">{{info?.dataDirectory}}</code><small>请保留完整 data 目录。该密码库绑定创建它的 Windows 账户与电脑。</small></div>
         <div class="setting-row"><span>应用版本</span><span>{{info?.version}}</span></div>
+        <div class="setting-row"><span>开源许可</span><button class="text-btn" @click="licenses?.showModal()">查看第三方声明</button></div>
       </div>
+      <UpdatePanel :v="v"/>
     </div>
+    <dialog ref="licenses" class="licenses-dialog"><h2>第三方开源声明</h2><pre>{{thirdPartyNotices}}</pre><div class="modal-actions"><button class="secondary" autofocus @click="licenses?.close()">关闭</button></div></dialog>
   </section>
 </template>
 <style>
 .settings.mcp-settings{max-width:none;min-width:0}.mcp-tabs{display:flex;gap:26px;border-bottom:1px solid #e7eaf1;margin:6px 0 25px}.mcp-tabs button{position:relative;background:none;border:0;font:inherit;font-size:12px;color:#8994a9;padding:14px 0}.mcp-tabs button.active{color:#5364dc;font-weight:600}.mcp-tabs button.active:after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:2px;background:#5364dc}
+.licenses-dialog{width:min(800px,85vw)}.licenses-dialog pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:50vh;overflow:auto;font-size:11px}
 </style>

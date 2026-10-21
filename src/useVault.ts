@@ -1,5 +1,6 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import { useUpdater } from './useUpdater';
 
 export type Kind = 'password' | 'api' | 'database' | 'generic';
 export interface DatabaseFields { databaseType:string; host:string; port:string; databaseName:string }
@@ -35,6 +36,7 @@ export function useVault() {
   const dirty = computed(() => JSON.stringify(form.value) !== baseline.value);
   type Draft = { entry:Entry|null; kind:Kind; fields:typeof form.value; baseline:string };
   const drafts = new Map<string,Draft>();
+  const updater = useUpdater(() => !!((editing.value||creating.value)&&dirty.value) || drafts.size>0 || !!permissionDraft.value || saving.value || settingsSaving.value || !!document.querySelector('dialog[open]:not(#update-dialog)'));
   let switching = false;
   const fieldsFor = (entry?:Entry) => ({group:entry?.group??'', tags:[...(entry?.tags??[])], database:entry?.database?{...entry.database}:{databaseType:'MySQL',host:'',port:'3306',databaseName:''}, title:entry?.title ?? '',account:entry?.account ?? '',url:entry?.url ?? '',secret:'',notes:entry?.notes ?? '',services:entry ? entry.services.map(service=>({...service})) : [{id:'',protocol:'openai' as ApiProtocol,url:''}]});
   function draftKey() { return creating.value ? `new:${formKind.value}` : editing.value?.id; }
@@ -177,7 +179,7 @@ export function useVault() {
     try {
       info.value = await invoke<Info>('desktop_info'); await refresh();
       if (info.value.smokeTest) { const { runSmoke } = await import('./smoke'); await runSmoke(); }
-      else { timer = setInterval(() => { if (document.visibilityState === 'visible') void refresh(); }, 2000); window.addEventListener('focus', focus); window.addEventListener('blur', hide); document.addEventListener('visibilitychange', visibility); }
+      else { updater.start(); timer = setInterval(() => { if (document.visibilityState === 'visible') void refresh(); }, 2000); window.addEventListener('focus', focus); window.addEventListener('blur', hide); document.addEventListener('visibilitychange', visibility); }
     } catch (value) { error.value = message(value); loading.value = false; }
   });
   onUnmounted(() => { clearInterval(timer); clearTimeout(toastTimer); window.removeEventListener('focus', focus); window.removeEventListener('blur', hide); document.removeEventListener('visibilitychange', visibility); });
@@ -210,6 +212,6 @@ export function useVault() {
   }
   function keyboard(e:KeyboardEvent){if(e.ctrlKey&&e.key==='k'){e.preventDefault();document.querySelector<HTMLInputElement>('#search')?.focus();}}
   onMounted(()=>window.addEventListener('keydown',keyboard));onUnmounted(()=>window.removeEventListener('keydown',keyboard));
-  return { permissionDraft, addService, page, query, entries, selected, revealed, info, loading, error, toast, saving, configVisible, creating, dirty, selectEntry, deleteDialog, editing, pendingDelete, formKind, formError, form, list, detail, title, config, navigate, refresh, pin, reveal, updateSecret, copy, openForm, closeForm, save, askDelete, confirmDelete, updateSettings, updatePermission, savePermissions, settingsSaving, toggleStartup, copyConfig, groupFilter,tagFilter,typeFilter,organization,trash,restore,emptyTrash,organize,filterGroup,filterTag,allEntries,duplicate,notify };
+  return { updater, permissionDraft, addService, page, query, entries, selected, revealed, info, loading, error, toast, saving, configVisible, creating, dirty, selectEntry, deleteDialog, editing, pendingDelete, formKind, formError, form, list, detail, title, config, navigate, refresh, pin, reveal, updateSecret, copy, openForm, closeForm, save, askDelete, confirmDelete, updateSettings, updatePermission, savePermissions, settingsSaving, toggleStartup, copyConfig, groupFilter,tagFilter,typeFilter,organization,trash,restore,emptyTrash,organize,filterGroup,filterTag,allEntries,duplicate,notify };
 }
 export type VaultUI=ReturnType<typeof useVault>;

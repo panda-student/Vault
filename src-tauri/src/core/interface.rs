@@ -45,6 +45,11 @@ pub struct FillRequest {
 }
 
 pub enum Operation {
+    UpdateStatus,
+    CheckUpdate,
+    DownloadUpdate,
+    CancelUpdate,
+    InstallUpdate,
     McpConfig,
     Search(Search),
     Read(Vec<String>),

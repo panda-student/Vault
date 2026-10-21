@@ -1,40 +1,103 @@
-name: ci-build
+name: Build and release Windows
 on:
   push:
-    branches: [ci-build]
-    paths-ignore:
-      - 'src-tauri/target/**'
+    branches: [main, ci-build]
+    tags: ['v*']
+    paths-ignore: ['docs/**', '**/*.md']
+  pull_request:
+  workflow_dispatch:
 permissions:
-  contents: write
+  contents: read
 concurrency:
-  group: ci-build
+  group: windows-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install frontend deps
-        run: npm install
-      - name: Frontend build (vue-tsc + vite)
+          cache: npm
+      - uses: dtolnay/rust-toolchain@1.90.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          cache-on-failure: false
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Verify version consistency
+        run: node scripts/update-release.mjs validate
+      - name: Frontend build
         run: npm run build
-      - name: Cargo unit tests
-        run: cargo test --release --manifest-path src-tauri/Cargo.toml
-      - name: Desktop build (no bundle)
+      - name: Rust unit tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - name: Refresh dependency notices
+        shell: pwsh
+        run: |
+          cargo metadata --locked --format-version 1 --filter-platform x86_64-pc-windows-msvc --manifest-path src-tauri/Cargo.toml | Set-Content -Encoding utf8NoBOM src-tauri/target/dependency-metadata.json
+          node scripts/generate-notices.mjs
+      - name: Desktop build
         run: npm run desktop:build
-      - name: MCP acceptance suites
+      - name: MCP and migration acceptance
         env:
           VAULT_EXE: src-tauri/target/release/local-password-manager.exe
         run: |
           npm run verify:integration
           npm run verify:permissions
-      - name: Commit exe artifact back to branch
-        if: success()
+          npm run verify:migration
+      - name: Package portable build
+        run: npm run package:portable
+      - name: Preserve short-lived build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vault-windows-${{ github.sha }}
+          path: |
+            artifacts/vault-*.zip
+            artifacts/size.json
+          retention-days: 7
+      - name: Sign stable update metadata
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          VAULT_UPDATE_SIGNING_KEY: ${{ secrets.VAULT_UPDATE_SIGNING_KEY }}
+        shell: pwsh
         run: |
-          git config user.name "ci-build-bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add -f src-tauri/target/release/local-password-manager.exe
-          git commit -m "ci: build artifact [skip ci]"
-          git push origin HEAD
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          node scripts/update-release.mjs manifest "artifacts/vault-$version/Vault.exe" artifacts/latest.json "${{ github.ref_name }}"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Publish GitHub Release attachments
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $stable = '${{ github.ref }}'.StartsWith('refs/tags/v')
+          $tag = if ($stable) { '${{ github.ref_name }}' } else { 'preview-' + '${{ github.sha }}'.Substring(0, 12) }
+          $files = @("artifacts/vault-$version.zip", "artifacts/vault-$version/Vault.exe", 'artifacts/size.json')
+          if ($stable) { $files += 'artifacts/latest.json' }
+          $lines = $files | ForEach-Object { (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + (Split-Path -Leaf $_) }
+          $lines | Set-Content -Encoding utf8NoBOM artifacts/SHA256SUMS
+          $files += 'artifacts/SHA256SUMS'
+          $existingText = gh release view $tag --repo '${{ github.repository }}' --json isDraft,targetCommitish 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            $existing = $existingText | ConvertFrom-Json
+            if ($existing.targetCommitish -ne '${{ github.sha }}') { throw 'Release points to a different commit; refusing to overwrite.' }
+            if (!$existing.isDraft) { Write-Output 'This commit is already published; keeping immutable release assets.'; exit 0 }
+          } else {
+            gh release create $tag --repo '${{ github.repository }}' --target '${{ github.sha }}' --draft --title "Vault $version$(if (!$stable) { ' · Preview' })" --generate-notes
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          gh release upload $tag @files --clobber --repo '${{ github.repository }}'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($stable) { gh release edit $tag --draft=false --latest --repo '${{ github.repository }}' }
+          else { gh release edit $tag --draft=false --prerelease --latest=false --repo '${{ github.repository }}' }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

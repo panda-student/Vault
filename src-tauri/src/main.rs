@@ -42,6 +42,30 @@ struct AppState {
     executable: PathBuf,
     smoke_report: Option<PathBuf>,
     smoke_finished: AtomicBool,
+    update_health: Option<(PathBuf, String)>,
+}
+#[tauri::command]
+async fn update_action(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    action: String,
+) -> Result<serde_json::Value> {
+    let operation = match action.as_str() {
+        "status" => Operation::UpdateStatus,
+        "check" => Operation::CheckUpdate,
+        "download" => Operation::DownloadUpdate,
+        "cancel" => Operation::CancelUpdate,
+        "install" => Operation::InstallUpdate,
+        _ => return Err(AppError::invalid()),
+    };
+    let core = state.core.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || core.execute(operation))
+        .await
+        .map_err(|_| AppError::new("UPDATE_ERROR", "更新任务未完成，请重试。"))??;
+    if action == "install" {
+        app.exit(0);
+    }
+    Ok(result)
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -356,6 +380,7 @@ fn desktop(
             save_settings,
             permission_preview,
             set_startup,
+            update_action,
             smoke_clipboard,
             smoke_window_cycle,
             smoke_resize,
@@ -426,6 +451,9 @@ fn desktop(
                 tray = tray.icon(icon.clone());
             }
             tray.build(app)?;
+            if let Some((path, token)) = &state.update_health {
+                std::fs::write(path, token)?;
+            }
             if is_smoke {
                 let handle = app.handle().clone();
                 std::thread::spawn(move || {
@@ -464,14 +492,34 @@ fn show_error(message: &str) {
     }
 }
 fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let bootstrap_args: Vec<_> = std::env::args_os().skip(1).collect();
+    if bootstrap_args
+        .first()
+        .is_some_and(|arg| arg == "--apply-update")
+    {
+        if bootstrap_args.len() != 2 {
+            return Err("Invalid updater arguments".into());
+        }
+        return core::apply_update(&PathBuf::from(&bootstrap_args[1])).map_err(Into::into);
+    }
     let mut is_mcp = false;
     let mut directory = None;
     let mut report = None;
     let mut background = false;
     let mut fixture_directory = None;
+    let mut update_health = None;
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
         match arg.to_str() {
+            Some("--update-health") => {
+                let path = PathBuf::from(args.next().ok_or("Missing health path")?);
+                let token = args
+                    .next()
+                    .ok_or("Missing health token")?
+                    .into_string()
+                    .map_err(|_| "Invalid health token")?;
+                update_health = Some((path, token));
+            }
             Some("--mcp") => is_mcp = true,
             Some("--data-dir") => {
                 directory = Some(PathBuf::from(
@@ -502,6 +550,21 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         return Err("--smoke-test requires an explicit --data-dir".into());
     }
     let executable = std::env::current_exe()?;
+    if let Some((path, token)) = &update_health {
+        let stage = path.parent().ok_or("Invalid health path")?;
+        if is_mcp
+            || !path.is_absolute()
+            || path.file_name().and_then(|n| n.to_str()) != Some("healthy")
+            || stage.parent() != executable.parent()
+            || !stage
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with(".vault-update-"))
+            || uuid::Uuid::parse_str(token).is_err()
+        {
+            return Err("Invalid update health arguments".into());
+        }
+    }
     let directory = directory.unwrap_or(
         executable
             .parent()
@@ -517,7 +580,9 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     if is_mcp && (report.is_some() || background) {
         return Err("MCP cannot be combined with desktop arguments".into());
     }
+    let runtime = core::UpdateRuntime::acquire(&executable)?;
     let core = core::open(&directory, is_mcp)?;
+    core.bind_update_runtime(runtime)?;
     if is_mcp {
         return mcp::run(core);
     }
@@ -527,6 +592,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
             executable,
             smoke_report: report,
             smoke_finished: AtomicBool::new(false),
+            update_health,
         },
         background,
     )

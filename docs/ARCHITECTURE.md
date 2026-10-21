@@ -1,4 +1,4 @@
-# 统一操作接口与四个核心服务
+# 统一操作接口与五个核心服务
 
 桌面模式与 `--mcp` 模式都通过 `CoreSession.execute(Operation)` 进入核心，`call<T>` 只是执行后将结果转换为类型的便捷方法。每个进程拥有自己的会话与服务实例，共用代码和数据目录。
 
@@ -12,6 +12,10 @@ flowchart TD
   API --> Storage[存储服务 storage.rs：授权后读写]
   API --> Filling[填写服务 filling.rs：授权后填写]
   API --> Windows[Windows 能力服务 windows.rs：授权后调用]
+  API --> Updater[更新服务 updater.rs：仅桌面]
+  Updater --> Windows
+  Updater --> Releases[GitHub Releases：签名元数据和更新包]
+  Actions[GitHub Actions：测试、构建、签名和发布] --> Releases
   Storage --> Vault[Vault / 标签 / 垃圾桶 / 事务]
   Vault --> Crypto[AES-256-GCM / Windows DPAPI]
   Vault --> DB[(SQLite)]
@@ -33,6 +37,7 @@ flowchart TD
 | 权限服务 | `core/permissions.rs` | 默认权限、标签规则、单条例外、MCP 总开关及固定边界；工具发现和操作执行使用同一策略 |
 | 存储服务 | `core/storage.rs`、`core/ai.rs` | 凭据业务、版本校验、标签、垃圾桶和 AI 安全元数据投影 |
 | 填写服务 | `core/filling.rs` | 持有输入目标，协调本地引用解析与窗口/文件填写 |
+| 更新服务 | `core/updater.rs` | 签名版本、下载、完整性校验、安装编排与失败回退 |
 | Windows 能力服务 | `core/windows.rs` | 启动设置、原生永久删除确认、剪贴板校验与端口调用 |
 | 底层实现 | `vault.rs`、`vault/`、`crypto.rs`、`credential_write.rs`、`fill.rs`、`startup.rs` | 加密存储、事务、文件和系统输入等实现细节 |
 
@@ -63,7 +68,7 @@ flowchart TD
 
 每次工具发现和操作执行都读取最新持久化设置，已建立连接的后续调用立即受新策略约束；正在执行的已授权操作不追溯撤销。客户端若缓存工具清单，可能需要刷新清单，但旧清单中的调用仍会被核心拒绝。
 
-权限修改、原文读取、系统剪贴板、启动设置、组织管理、垃圾桶查看/恢复和永久删除固定不对 MCP 开放。关闭总开关会拒绝全部后续 MCP 操作。默认六组权限均开启，以兼容已有行为；旧设置缺少权限字段时按该默认值读取，保存时写入新结构。
+权限修改、原文读取、系统剪贴板、启动设置、垃圾桶查看、永久删除和在线更新固定不对 MCP 开放。MCP 的恢复、置顶和标签管理沿用修改权限及对象范围校验。关闭总开关会拒绝全部后续 MCP 操作。默认六组权限均开启，以兼容已有行为；旧设置缺少权限字段时按该默认值读取，保存时写入新结构。
 
 永久清空由核心收集垃圾桶快照，调用 Windows 服务显示原生确认框（默认取消），确认后核验快照再删除。既不能传一个 `confirmed=true` 绕过，也不能通过 MCP 调用该操作。
 
@@ -98,3 +103,6 @@ node scripts/verify-write.mjs
 v3 格式把旧分组迁移为同名标签并去重，原账号、密码、地址、数据库字段、备注和垃圾桶状态保留。旧 `group` 输入作为兼容别名转为标签，旧分组筛选参数按标签匹配；界面不再提供独立分组。
 
 已有 v1/v2 数据库升级前通过 SQLite `VACUUM INTO` 生成一致的加密备份，位于数据目录的 `backups/before-tags-permissions-*.db`。迁移在事务中完成，重新打开不会重复修改已迁移条目的版本。旧全局权限的显式配置继续保留；新密码库默认全部允许。
+## 在线更新
+
+更新操作通过统一 Operation 接口，在核心被固定为 DesktopOnly。更新服务编排检查、下载与验签，Windows 能力服务执行进程启动。两入口启动时先获取共享运行锁，更新需取得独占锁。详细发布协议、数据保护、失败回退和验证边界见 [UPDATES.md](UPDATES.md)。

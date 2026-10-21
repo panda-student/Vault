@@ -307,13 +307,15 @@ fn mcp_restore_pin_and_organize_stay_within_update_permission() {
         previous: Some("vault-work".into()),
     })
     .unwrap();
-    assert!(desktop
-        .service
-        .storage
-        .summary(&es[0].id)
-        .unwrap()
-        .tags
-        .contains(&"vault-team".into()));
+    assert!(
+        desktop
+            .service
+            .storage
+            .summary(&es[0].id)
+            .unwrap()
+            .tags
+            .contains(&"vault-team".into())
+    );
     assert!(settings(&desktop).mcp_tag_rules.contains_key("vault-team"));
     // 删除带禁止规则的标签会让凭据回落到更宽松的默认规则，构成提权，必须拒绝。
     assert_eq!(
@@ -640,6 +642,27 @@ fn mcp_mutations_return_minimal_results_and_ignore_no_identity_payload() {
     );
     assert!(!mcp.tool_allowed("empty_trash").unwrap());
     assert!(!mcp.tool_allowed("save_settings").unwrap());
+}
+
+#[test]
+fn updates_are_desktop_only_even_if_mcp_bypasses_tool_discovery() {
+    let directory = tempfile::tempdir().unwrap();
+    let mcp = open(directory.path(), true).unwrap();
+    for operation in [
+        Operation::UpdateStatus,
+        Operation::CheckUpdate,
+        Operation::DownloadUpdate,
+        Operation::CancelUpdate,
+        Operation::InstallUpdate,
+    ] {
+        assert_eq!(
+            mcp.execute(operation).unwrap_err().code,
+            "PERMISSION_DENIED"
+        );
+    }
+    for name in ["check_update", "download_update", "install_update"] {
+        assert!(!mcp.tool_allowed(name).unwrap());
+    }
 }
 #[test]
 fn adapters_only_hold_bound_sessions_and_enter_operation_contract() {
