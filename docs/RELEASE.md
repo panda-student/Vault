@@ -1,3 +1,16 @@
+# 0.5.4 distribution and update verification
+
+- Downloads: portable `vault-0.5.4.zip` and interactive `Vault-0.5.4-Setup.exe`; no standalone program EXE attachment.
+- Installer: current-user NSIS, default `D:\Vault` (local application directory fallback without D:), editable directory, Start menu shortcut and uninstall registration. Reinstall and uninstall preserve the vault. In-use executables prevent replacement/removal.
+- MCP server identity and generated configuration key: `Vault`. GitHub repository: `panda-student/Vault`.
+- Schema 2 update feed signs the portable ZIP hash/size and the program hash/size. Rust reads only the fixed executable member, then the existing local helper performs replacement, health verification and rollback.
+- **Users of 0.5.3 and earlier must manually upgrade once**, preserving the original Windows user, computer and complete data directory.
+- Local verification: 48 Rust tests; 27 native signed ZIP update/rollback checks with two retained MCP connections; installer wizard directory editing and data-preserving reinstall/uninstall. Final installed-artifact regression runs in CI before publishing.
+- Dependency notices regenerated: 324 components, no missing license texts. The ZIP reader uses the minimal DEFLATE feature; no bundled WebView2 or PowerShell extraction.
+- Native update tests use isolated debug builds 0.5.4 -> 0.5.5 with a signed localhost source; they do not claim a published 0.5.5 release.
+
+---
+
 # 0.4.0 release verification
 
 Windows x64 portable release, using the installed system WebView2 runtime. All acceptance data is synthetic and isolated from the user's vault.

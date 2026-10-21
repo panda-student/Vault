@@ -1569,9 +1569,14 @@ Declared license: Unicode-3.0
 License/notice texts: 101
 
 
+zip 4.6.1
+Declared license: MIT
+License/notice texts: 223
+
+
 zlib-rs 0.6.8
 Declared license: Zlib
-License/notice texts: 223
+License/notice texts: 224
 
 
 zmij 1.0.23
@@ -1581,42 +1586,42 @@ License/notice texts: 3
 
 zune-core 0.5.3
 Declared license: MIT OR Apache-2.0 OR Zlib
-License/notice texts: 161, 224, 225
+License/notice texts: 161, 225, 226
 
 
 zune-jpeg 0.5.15
 Declared license: MIT OR Apache-2.0 OR Zlib
-License/notice texts: 161, 224, 225
+License/notice texts: 161, 225, 226
 
 
 vue 3.5.44
 Declared license: MIT
-License/notice texts: 226
+License/notice texts: 227
 
 
 @vue/shared 3.5.44
 Declared license: MIT
-License/notice texts: 226
+License/notice texts: 227
 
 
 @vue/reactivity 3.5.44
 Declared license: MIT
-License/notice texts: 226
+License/notice texts: 227
 
 
 @vue/runtime-core 3.5.44
 Declared license: MIT
-License/notice texts: 226
+License/notice texts: 227
 
 
 @vue/runtime-dom 3.5.44
 Declared license: MIT
-License/notice texts: 226
+License/notice texts: 227
 
 
 @tauri-apps/api 2.12.4
 Declared license: Apache-2.0 OR MIT
-License/notice texts: 14, 179, 227
+License/notice texts: 14, 179, 228
 
 ========================================================================
 License/notice text 1
@@ -16442,6 +16447,34 @@ DEALINGS IN THE SOFTWARE.
 ========================================================================
 License/notice text 223
 
+The MIT License (MIT)
+
+Copyright (c) 2014 Mathijs van de Nes
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Some files in the "tests/data" subdirectory of this repository are under other
+licences; see files named LICENSE.*.txt for details.
+
+========================================================================
+License/notice text 224
+
 (C) 2024 Trifecta Tech Foundation 
 
 This software is provided 'as-is', without any express or implied
@@ -16464,7 +16497,7 @@ freely, subject to the following restrictions:
 
 
 ========================================================================
-License/notice text 224
+License/notice text 225
 
 MIT License
 
@@ -16490,7 +16523,7 @@ SOFTWARE.
 
 
 ========================================================================
-License/notice text 225
+License/notice text 226
 
 zlib License
 
@@ -16514,7 +16547,7 @@ freely, subject to the following restrictions:
 
 
 ========================================================================
-License/notice text 226
+License/notice text 227
 
 The MIT License (MIT)
 
@@ -16540,7 +16573,7 @@ THE SOFTWARE.
 
 
 ========================================================================
-License/notice text 227
+License/notice text 228
 
 SPDXVersion: SPDX-2.1
 DataLicense: CC0-1.0

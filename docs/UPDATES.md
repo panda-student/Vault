@@ -1,6 +1,6 @@
-# 便携版在线更新
+# 安装、便携分发与在线更新
 
-0.5.1 起，设置页支持检查、下载、取消和重启更新。启动和每小时自动检查，由用户确认重启。0.4.x 首次升级需要手动下载一次。
+0.5.1 起，设置页支持检查、下载、取消和重启更新。启动和每小时自动检查，由用户确认重启。0.5.4 起改用签名 ZIP 更新；0.5.3 及以前版本需手动下载安装包或 ZIP 升级一次。
 
 ## 模块与权限
 
@@ -20,7 +20,7 @@
 {"payload":"base64(UTF-8 JSON)","signature":"base64(Ed25519 signature over exact payload bytes)"}
 ```
 
-签名载荷包含 schema=1、version、platform=windows-x86_64、固定仓库/版本目录的 Vault.exe URL、SHA-256、精确字节数和更新说明。先验签再处理版本，只接受较新的正式版本。下载限 64 MiB，校验长度、MZ 和哈希，安装前及辅助进程中再次校验。在线更新只替换 EXE，完整 ZIP 还包含 README、许可证和第三方声明。
+签名载荷 schema=2 包含 version、platform=windows-x86_64、固定仓库/版本目录的 vault-<version>.zip URL、程序 sha256/size、压缩包 archive_sha256/archive_size 和更新说明。先验签，只接受较新的正式版本。程序和 ZIP 各限 64 MiB；下载先校验 ZIP 长度和哈希，Rust ZIP 解析只读固定的 vault-<version>/Vault.exe 成员，不解压任何其他路径，再校验程序长度、MZ 和哈希，安装前及辅助进程中再次校验。在线更新只替换程序；下载完整分发包后，用户也可手动更新 README、许可证和第三方声明。安装版与便携版使用同一套更新流程，不运行安装器。
 
 公钥位于 src-tauri/update-public-key.txt；PKCS#8 DER 私钥的 Base64 文本保存为 GitHub Secret VAULT_UPDATE_SIGNING_KEY。本机备份在用户 .codex/secrets/local-password-manager/update-signing-key.dpapi，由当前用户 DPAPI 加密。该备份不能直接跨电脑解密，需要另行安排受保护的离线恢复备份；不要随意更换已发行客户端信任的公钥。更新验签与 Windows Authenticode/SmartScreen 签名互相独立。
 
@@ -39,7 +39,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-updater.ps1 -U
 - PR 和 ci-build：验证并保留 7 天 Actions 附件，不发布正式版。
 - 不再将 EXE 提交回源码；使用标准 Windows runner。
 
-正式发布需要修改三个版本文件及锁文件，再推送对应版本标签。Release 附件为 Vault.exe、vault-<version>.zip、latest.json、SHA256SUMS、size.json。Secret 缺失或不匹配时发布失败，不允许无签名降级。
+正式发布需要修改三个版本文件及锁文件，再推送对应版本标签。Release 应用下载附件为 Vault-<version>-Setup.exe 和 vault-<version>.zip；另含 latest.json、SHA256SUMS、size.json、installer-size.json 元数据，不上传独立 Vault.exe。Secret 缺失或不匹配时发布失败，不允许无签名降级。
 
 ## 数据与失败处理
 
@@ -59,4 +59,6 @@ CI 迁移验收下载已发布的 v0.3.0 便携包并校验固定 SHA-256，覆�
 
 共享核心与多连接验收：`node scripts/verify-mcp-handoff.mjs`（可用 VAULT_EXE 指定程序）；更新/回退和连接保留验收：`node scripts/verify-update.mjs`（隔离签名测试源与两个 debug 构建）。
 
-仓库已更名为 `panda-student/Vault`。签名更新清单暂时保留旧仓库下载 URL，通过 GitHub 重定向下载，兼容 0.5.3 及以前版本的地址校验；新客户端同时校验新旧两种固定地址。请勿占用原仓库名，以免破坏重定向。
+仓库已更名为 `panda-student/Vault`。0.5.4 的 schema=2 清单指向新仓库的 ZIP；旧版会拒绝新清单，需要手动升级，不会把安装器误当主程序替换。保留 schema=1 读取能力仅用于已签名的历史 EXE 清单。
+
+安装包采用 NSIS 3.13，使用现有工具链或校验固定 SHA-256 的便携编译器，不安装系统服务、不捆绑 WebView2。按当前 Windows 用户安装，默认 D:\Vault，无 D 盘时回退当前用户本地目录；目录页允许修改，重装沿用已有目录。只写程序、授权文件、开始菜单快捷方式和当前用户卸载注册表。卸载明确删除安装文件，保留 data 和其他用户文件。

@@ -31,6 +31,10 @@
 /scripts/*
 !/scripts/tauri.mjs
 !/scripts/package-portable.ps1
+!/scripts/package-installer.ps1
+!/scripts/installer.nsi
+!/scripts/verify-installer.ps1
+!/scripts/verify-installer.mjs
 !/scripts/verify-next.mjs
 !/scripts/verify-permissions.mjs
 !/scripts/verify-resource-ui.mjs

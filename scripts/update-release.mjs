@@ -1,7 +1,7 @@
 // Signed, version-bound update metadata. Private keys are never written to the repository.
 import { generateKeyPairSync, createPrivateKey, createPublicKey, sign, verify, createHash } from 'node:crypto';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { dirname, resolve, basename } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import assert from 'node:assert/strict';
 
 const [command, ...args] = process.argv.slice(2);
@@ -35,8 +35,8 @@ if (command === 'validate') {
   const raw = (await readFile('src-tauri/update-public-key.txt', 'utf8')).trim();
   const expected = createPublicKey(privateKey).export({ format: 'der', type: 'spki' }).subarray(-32).toString('base64');
   assert.equal(expected, raw, 'Signing key does not match the embedded public key');
-  // Keep the signed download URL compatible with <=0.5.3 clients; GitHub redirects this alias to panda-student/Vault.
-  const payload = Buffer.from(JSON.stringify({ schema: 1, version, platform: 'windows-x86_64', url: `https://github.com/panda-student/local-password-manager/releases/download/${tag}/${basename(binary)}`, sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length, notes: notesFile ? (await readFile(notesFile, 'utf8')).slice(0, 16000) : `Vault ${version}` }));
+  const archive = await readFile(resolve(dirname(binary), `../vault-${version}.zip`));
+  const payload = Buffer.from(JSON.stringify({ schema: 2, version, platform: 'windows-x86_64', url: `https://github.com/panda-student/Vault/releases/download/${tag}/vault-${version}.zip`, sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length, archive_sha256: createHash('sha256').update(archive).digest('hex'), archive_size: archive.length, notes: notesFile ? (await readFile(notesFile, 'utf8')).slice(0, 16000) : `Vault ${version}` }));
   const signature = sign(null, payload, privateKey);
   assert.ok(verify(null, payload, createPublicKey(privateKey), signature));
   await writeFile(output, JSON.stringify({ payload: payload.toString('base64'), signature: signature.toString('base64') }, null, 2) + '\n');

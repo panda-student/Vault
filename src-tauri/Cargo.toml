@@ -1,6 +1,6 @@
 [package]
 name = "local-password-manager"
-version = "0.5.3"
+version = "0.5.4"
 description = "Portable Windows password and API credential manager"
 edition = "2024"
 rust-version = "1.90"
@@ -32,6 +32,7 @@ ed25519-dalek = "2"
 sha2 = "0.10"
 semver = "1"
 fs2 = "0.4"
+zip = { version = "=4.6.1", default-features = false, features = ["deflate-flate2"] }
 
 [dev-dependencies]
 tempfile = "3"

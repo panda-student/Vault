@@ -14,7 +14,7 @@ import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 
 const run = promisify(execFile), pause=ms=>new Promise(r=>setTimeout(r,ms));
 const root=resolve('artifacts/update-acceptance');await mkdir(root,{recursive:true});
-const fromVersion=process.env.UPDATE_FROM_VERSION||'0.5.3',toVersion=process.env.UPDATE_TO_VERSION||'0.5.4',failedVersion='0.5.5';
+const fromVersion=process.env.UPDATE_FROM_VERSION||'0.5.4',toVersion=process.env.UPDATE_TO_VERSION||'0.5.5',failedVersion='0.5.6';
 const from=resolve(process.env.UPDATE_FROM||join(root,`builds/v${fromVersion}.exe`));
 const to=resolve(process.env.UPDATE_TO||join(root,`builds/v${toVersion}.exe`));
 const appRoot=await mkdtemp(join(tmpdir(),'vault-update-原生 验收-'));
@@ -26,16 +26,25 @@ const check=(name,ok)=>{report.checks.push({name,passed:!!ok});assert.ok(ok,name
 const keyCommand="Add-Type -AssemblyName System.Security; $p=Join-Path $env:USERPROFILE '.codex/secrets/local-password-manager/update-signing-key.dpapi'; $b=[Security.Cryptography.ProtectedData]::Unprotect([IO.File]::ReadAllBytes($p),$null,[Security.Cryptography.DataProtectionScope]::CurrentUser); [Console]::Write([Text.Encoding]::UTF8.GetString($b)); [Array]::Clear($b,0,$b.Length)";
 const secret=(await run('powershell.exe',['-NoProfile','-Command',keyCommand],{windowsHide:true})).stdout.trim();
 const privateKey=createPrivateKey({key:Buffer.from(secret,'base64'),format:'der',type:'pkcs8'});
-const payload=Buffer.from(JSON.stringify({schema:1,version:toVersion,platform:'windows-x86_64',url:`https://github.com/panda-student/Vault/releases/download/v${toVersion}/Vault.exe`,sha256:report.toSha256,size:binary.length,notes:'原生更新验收：保留标签、凭据、权限、MCP 连接与自定义数据目录。'}));
+async function zipRelease(bytes,version){
+ const folder=await mkdtemp(join(appRoot,'archive-'));
+ const member=join(folder,`vault-${version}`);await mkdir(member);await writeFile(join(member,'Vault.exe'),bytes);
+ const archive=join(folder,'portable.zip');
+ await run('powershell.exe',['-NoProfile','-Command','Compress-Archive -LiteralPath $env:ZIP_MEMBER -DestinationPath $env:ZIP_OUTPUT'],{windowsHide:true,env:{...process.env,ZIP_MEMBER:member,ZIP_OUTPUT:archive}});
+ return await readFile(archive);
+}
+function signedPayload(bytes,archive,version,notes){return Buffer.from(JSON.stringify({schema:2,version,platform:'windows-x86_64',url:`https://github.com/panda-student/Vault/releases/download/v${version}/vault-${version}.zip`,sha256:createHash('sha256').update(bytes).digest('hex'),size:bytes.length,archive_sha256:createHash('sha256').update(archive).digest('hex'),archive_size:archive.length,notes}));}
+const archive=await zipRelease(binary,toVersion);
+const payload=signedPayload(binary,archive,toVersion,'原生 ZIP 更新验收：保留凭据、权限和 MCP 连接。');
 const valid={payload:payload.toString('base64'),signature:sign(null,payload,privateKey).toString('base64')};
-let activeEnvelope=valid,activeBinary=binary;
+let activeEnvelope=valid,activeBinary=archive;
 let mode='bad-signature';
 const server=createServer((req,res)=>{
  if(req.url==='/latest.json'){
   if(mode==='offline'){res.writeHead(503);res.end();return;}
   res.setHeader('Content-Type','application/json');res.end(JSON.stringify(mode==='bad-signature'?{...activeEnvelope,signature:Buffer.alloc(64).toString('base64')}:activeEnvelope));return;
  }
- if(req.url==='/Vault.exe'){
+ if(/^\/vault-[\d.]+\.zip$/.test(req.url)){
   const bytes=mode==='corrupt'?Buffer.from(activeBinary):activeBinary;if(mode==='corrupt')bytes[bytes.length-1]^=1;
   res.setHeader('Content-Length',bytes.length);let offset=0;
   const timer=setInterval(()=>{if(offset>=bytes.length){clearInterval(timer);res.end();return;}const end=Math.min(bytes.length,offset+256*1024);res.write(bytes.subarray(offset,end));offset=end;},15);
@@ -81,7 +90,7 @@ try{
  mode='valid';await click('#check-update');await waitPhase('available');check('signed-newer-version-discovered',(await status()).version===toVersion);
  await click('#download-update');await waitPhase('downloading');await click('#cancel-update');await waitPhase('error');check('download-cancellation-is-retryable',(await status()).error.includes('取消'));
  mode='corrupt';await click('#download-update');await waitPhase('error');check('corrupted-binary-rejected',(await status()).error.includes('校验'));check('failed-download-preserves-executable',createHash('sha256').update(await readFile(executable)).digest('hex')===report.fromSha256);
- mode='valid';await click('#download-update');await waitPhase('ready');check('download-verified-and-ready',(await status()).received===binary.length);await screenshot('02-ready');
+ mode='valid';await click('#download-update');await waitPhase('ready');check('download-verified-and-ready',(await status()).received===archive.length);await screenshot('02-ready');
  await click('[data-nav="entries"]');await browser('fill','#f-title','未保存草稿');await click('[data-nav="settings"]');await click('#install-update');await click('#cancel-install-update');check('confirmation-cancel-keeps-app',(await invoke('desktop_info')).version===fromVersion);
  await click('#install-update');await click('#confirm-install-update');check('unsaved-draft-blocks-restart',(await evaluate("document.querySelector('#update-error')?.textContent||''")).includes('未保存'));await screenshot('03-draft-blocked');
  await click('[data-nav="entries"]');await click('#cancel-edit');await click('[data-nav="settings"]');
@@ -108,8 +117,8 @@ try{
  const failingSource=join(root,'failed-start.rs'), failingBinary=join(root,'failed-start.exe');
  await writeFile(failingSource,'#![windows_subsystem="windows"]\nfn main(){std::process::exit(1);}\n');
  await run(join(process.env.USERPROFILE,'.cargo/bin/rustc.exe'),['--crate-name','failed_start','-C','opt-level=s','-C','strip=symbols',failingSource,'-o',failingBinary],{windowsHide:true});
- activeBinary=await readFile(failingBinary);
- const failedPayload=Buffer.from(JSON.stringify({schema:1,version:failedVersion,platform:'windows-x86_64',url:`https://github.com/panda-student/Vault/releases/download/v${failedVersion}/Vault.exe`,sha256:createHash('sha256').update(activeBinary).digest('hex'),size:activeBinary.length,notes:'仅验收：启动失败应回退'}));
+ const failedBytes=await readFile(failingBinary);activeBinary=await zipRelease(failedBytes,failedVersion);
+ const failedPayload=signedPayload(failedBytes,activeBinary,failedVersion,'仅验收：启动失败应回退');
  activeEnvelope={payload:failedPayload.toString('base64'),signature:sign(null,failedPayload,privateKey).toString('base64')};
  await click('#check-update');await waitPhase('available');await click('#download-update');await waitPhase('ready');
  await click('#install-update');await click('#confirm-install-update');ws.close();await pause(1600);session=`vault-update-rollback-${process.pid}`;await connect();

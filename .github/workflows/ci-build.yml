@@ -70,12 +70,19 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Package portable build
         run: npm run package:portable
+      - name: Package installer
+        run: npm run package:installer
+      - name: Verify installed application and uninstall preservation
+        run: node scripts/verify-installer.mjs
       - name: Preserve short-lived build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: vault-windows-${{ github.sha }}
           path: |
             artifacts/vault-*.zip
+            artifacts/Vault-*-Setup.exe
+            artifacts/installer-size.json
+            artifacts/installer-verification.json
             artifacts/size.json
           retention-days: 7
       - name: Sign stable update metadata
@@ -96,7 +103,7 @@ jobs:
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $stable = '${{ github.ref }}'.StartsWith('refs/tags/v')
           $tag = if ($stable) { '${{ github.ref_name }}' } else { 'preview-' + '${{ github.sha }}'.Substring(0, 12) }
-          $files = @("artifacts/vault-$version.zip", "artifacts/vault-$version/Vault.exe", 'artifacts/size.json')
+          $files = @("artifacts/vault-$version.zip", "artifacts/Vault-$version-Setup.exe", 'artifacts/size.json', 'artifacts/installer-size.json')
           if ($stable) { $files += 'artifacts/latest.json' }
           $lines = $files | ForEach-Object { (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + (Split-Path -Leaf $_) }
           $lines | Set-Content -Encoding utf8NoBOM artifacts/SHA256SUMS
@@ -107,7 +114,17 @@ jobs:
             if ($existing.targetCommitish -ne '${{ github.sha }}') { throw 'Release points to a different commit; refusing to overwrite.' }
             if (!$existing.isDraft) { Write-Output 'This commit is already published; keeping immutable release assets.'; exit 0 }
           } else {
-            gh release create $tag --repo '${{ github.repository }}' --target '${{ github.sha }}' --draft --title "Vault $version$(if (!$stable) { ' · Preview' })" --generate-notes
+            @"
+          ## 下载选择
+          - Vault-$version-Setup.exe：安装向导，默认 D:\Vault，可修改目录；提供开始菜单和卸载入口，卸载保留密码库。
+          - vault-$version.zip：便携版，解压后启动 Vault.exe。
+
+          ## 升级提示
+          0.5.3 及以前版本需要手动升级一次：退出 Vault、断开 MCP，备份完整 data，将新版安装或解压到原目录后重新连接 MCP。
+          0.5.4 起安装版和便携版都从签名 ZIP 在线更新，不再提供独立 Vault.exe 附件。
+          Windows 10/11 x64，需要系统已有 WebView2 Runtime。密码库仍绑定原 Windows 用户和电脑。
+          "@ | Set-Content -Encoding utf8NoBOM artifacts/release-notes.md
+            gh release create $tag --repo '${{ github.repository }}' --target '${{ github.sha }}' --draft --title "Vault $version$(if (!$stable) { ' · Preview' })" --notes-file artifacts/release-notes.md
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
           gh release upload $tag @files --clobber --repo '${{ github.repository }}'
