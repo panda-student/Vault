@@ -20,6 +20,7 @@ if ($existing.Count -gt 0) { throw 'Package directory already exists and is not 
 Copy-Item -LiteralPath $releaseBinary -Destination (Join-Path $packageDirectory 'Vault.exe')
 Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\PORTABLE-README.txt') -Destination (Join-Path $packageDirectory 'README.txt')
 Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination (Join-Path $packageDirectory 'LICENSE.txt')
+Copy-Item -LiteralPath (Join-Path $projectRoot 'NOTICE') -Destination (Join-Path $packageDirectory 'NOTICE.txt')
 Copy-Item -LiteralPath (Join-Path $projectRoot 'THIRD_PARTY_NOTICES.txt') -Destination $packageDirectory
 Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\third-party-sources') -Destination (Join-Path $packageDirectory 'third-party-sources') -Recurse
 $zipPath = Join-Path $artifactRoot "$packageName.zip"

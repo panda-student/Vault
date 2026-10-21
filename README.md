@@ -9,8 +9,9 @@ Windows 便携凭据管理器：本地加密保存，人工直接编辑，AI 按
 ## 功能
 
 - 账号密码、API 凭据、数据库、通用四种字段模板。
-- 自由一级分组、多标签、类型与关键词组合筛选；支持同网站多账号、同系统多环境。
+- 自由标签、类型与关键词组合筛选；旧分组自动迁移为同名标签。
 - 列表图标置顶、直接编辑、会话草稿、版本冲突检查。
+- MCP 默认规则 → 标签规则 → 单条例外；同表展开，生效预览由 Rust 核心计算，批量未授权操作整批回滚。
 - 同一 API 密钥关联多个协议与服务地址；不执行 API 请求或连接测试。
 - 数据库字段保存、复制与按引用填写；不包含数据库驱动、查询或连接测试。
 - 用户与 AI 删除均进入垃圾桶，可恢复。永久清空仅通过桌面原生确认，不提供 MCP 永久删除工具。
@@ -39,7 +40,7 @@ Windows 便携凭据管理器：本地加密保存，人工直接编辑，AI 按
 | 工具 | 用途 |
 | --- | --- |
 | `get_mcp_config` | 获取当前程序与数据目录的连接配置 |
-| `search_entries` | 查询受控元数据，可按关键词、类型、分组、标签筛选 |
+| `search_entries` | 查询受控元数据，可按关键词、类型、标签筛选（兼容旧 group 参数） |
 | `get_entries` | 获取受控元数据，不返回密钥或备注 |
 | `create_entries` | 批量创建，兼容单条 |
 | `update_entries` | 按版本部分更新，批量原子提交 |
@@ -81,13 +82,22 @@ node scripts/verify-next.mjs
 
 - `src/components/`：侧栏、列表、凭据编辑器、垃圾桶、设置。
 - `src/useVault.ts`：界面状态、草稿与桌面调用。
+- `src-tauri/src/core.rs`：桌面和 MCP 共用的 Rust 应用服务；统一凭据读写、版本校验、垃圾桶和本地填写入口。
+- `src-tauri/src/core/interface.rs`：统一操作契约；两个适配器都使用绑定身份的 `CoreSession`。
+- `src-tauri/src/core/permissions.rs`：核心权限服务，统一计算默认、标签、单条例外以及固定禁止边界。
+- `src-tauri/src/core/storage.rs`、`filling.rs`、`windows.rs`：存储、填写与 Windows 能力服务。
+- `src-tauri/src/core/ai.rs`：AI 安全元数据投影，先脱敏再执行搜索筛选。
 - `src-tauri/src/vault/`：数据模型、组织方式、垃圾桶。
 - `vault.rs` / `crypto.rs`：加密存储与密钥保护。
 - `mcp.rs` / `ai_output.rs`：AI 接口及敏感输出过滤。
 - `fill.rs` / `credential_write.rs`：焦点输入、文件引用写入。
 
+桌面命令与 MCP 均通过 `CoreSession.execute(Operation)` 调用业务能力。核心接口先检查权限，再调度存储、填写和 Windows 能力服务。两种进程模式各自创建绑定身份的会话，共享代码与数据目录。详见 [架构说明](docs/ARCHITECTURE.md)。
+
+在「MCP 管理 → 权限管理」中可分别允许或禁止 MCP 读取元数据、新增、修改、移入垃圾桶、窗口填写及文件写入，保存后后续调用立即受新规则约束。默认兼容已有权限。MCP 原文读取、权限修改和永久删除固定禁止，不能通过打开开关获得这些能力。
+
 项目提供源代码与可复现构建流程；尚未经过独立第三方安全审计。
 
 ## 许可证
 
-项目代码采用 [MIT](LICENSE) 许可证，依赖组件保留各自许可证，详见 `THIRD_PARTY_NOTICES.txt`。
+项目代码采用 [Apache-2.0](LICENSE) 许可证，依赖组件保留各自许可证，详见 `THIRD_PARTY_NOTICES.txt`。

@@ -48,6 +48,8 @@
 !/docs/RELEASE.md
 !/docs/ARCHITECTURE.md
 !/docs/prototypes/
+/docs/prototypes/*
+!/docs/prototypes/vault.html
 
 **/node_modules/
 **/target/

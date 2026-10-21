@@ -1,10 +1,11 @@
 [package]
 name = "local-password-manager"
-version = "0.3.0"
+version = "0.4.0"
 description = "Portable Windows password and API credential manager"
 edition = "2024"
 rust-version = "1.90"
 publish = false
+license = "Apache-2.0"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

@@ -1,30 +1,54 @@
-# 0.3.0 release verification
+# 0.4.0 release verification
 
-Verified on Windows with system WebView2 using isolated databases and synthetic credentials.
+Windows x64 portable release, using the installed system WebView2 runtime. All acceptance data is synthetic and isolated from the user's vault.
 
-- Rust unit tests: 18 passed, including encryption, transactions, organization rename, trash restore and purge snapshot checks.
-- MCP and desktop integration: 21 checks passed; native WebView2 suite: 73 checks passed (includes actual hit-target checks).
-- Native confirmation: cancel and confirm exercised; default action is cancel.
-- Native Notepad / PowerShell ISE / file writes: 20 checks passed. Independently saved files matched the synthetic credential and retained surrounding text.
-- Legacy schema migration: 6 checks passed; old IDs, revisions, service IDs, URLs and secret preserved; old REST protocols normalized to custom.
-- ZIP extracted into an isolated directory; packaged executable reran MCP, desktop and native editor verification.
-- The public source file set was rebuilt with npm ci and npm run build; Rust tests passed from that source copy.
+## Changes
 
-## Artifacts
+- Tags replace independent groups. Old groups become deduplicated, same-name tags in active and deleted records; old group API input remains a compatibility alias.
+- MCP permission matrix: defaults first, expand tags in the same table, then expand a tag to edit individual credentials. Collapsing never revokes saved rules.
+- Core evaluates each operation using entry override, then tag rules (deny wins conflicts), then defaults. Access and the individual operation must both be allowed. New vaults default to all permissions enabled; existing explicit settings are preserved.
+- Search omits unauthorized objects; mixed-authority batch reads fail as a whole. Batch mutations authorize old/proposed scope against persisted settings inside the write transaction and roll back completely on failure. MCP cannot relabel an entry to escalate its permissions.
+- Effective-permission previews use the Rust core. Object rules are encrypted. Tag rename/deletion updates rules, active records, deleted records and the catalog atomically. Unsaved UI permission drafts survive page navigation.
+- Existing v1/v2 databases receive a consistent encrypted SQLite backup before v3 migration. Reopening does not repeat record-version changes. Secret values and other fields are preserved.
+- Project license is Apache-2.0; dependency licenses and notices are retained separately.
 
-- EXE: 5,476,864 bytes
-- Complete extracted package including licenses and third-party source archives: 6,337,929 bytes
-- ZIP: 2,748,837 bytes
-- EXE SHA-256: `fe1075f3195849600b3164e880f160f9b4140c81da3073468dc7a4a2ef2ea707`
-- ZIP SHA-256: `fa5412693b58c9efb7b673699e82c4579d0110ca7786f84474b8de3973fad2ff`
+## Validation
+
+| Check | Result |
+| --- | --- |
+| Rust tests | 31 passed, including legacy upgrade, encrypted backup, conflicting labels, overrides and transactional denial |
+| Rust Clippy | Passed with warnings treated as errors |
+| Vue/TypeScript production build | Passed |
+| Live stdio permission checks | 38 passed, including same-connection revocation and scoped batch rollback |
+| MCP / desktop integration | 21 passed |
+| Native release WebView2 suite | 122 passed, including real hit targets, checkbox persistence and native window resizing |
+| Interactive debug WebView2 + live MCP | 25 passed, including tag rename/delete, hidden-rule enforcement, shared entry overrides and draft retention |
+| Legacy executable migration | 6 passed |
+| Native Notepad / PowerShell ISE / file writes | 20 passed, including independent saved-file comparison and one-use target replay rejection |
+| Portable ZIP extraction | Distribution-only files, Apache license/NOTICE, SHA-256 verified; extracted EXE reran desktop/MCP and native editor acceptance |
+
+The packaged executable's hash is the same hash recorded by the release integration and package tests. No real credentials or user database were used in these tests or included in the package.
+
+## Size and hashes
+
+- EXE: **5,603,840 bytes** (5.60 MB).
+- Complete extracted package: **6,475,608 bytes**, including notices and required third-party sources.
+- ZIP: **2,812,319 bytes** (2.81 MB).
+- EXE SHA-256: `58085a0cb6717397c3d96b253ae6c1e4562fdb1d3218f6d4c2dcba43826be6d7`.
+- ZIP SHA-256: `68dc2ae3c4d196d40616f3b954e8aa0ea4d35c7d1f538b1f7a1e60093e0a9485`.
 
 ## Screenshots
 
-All displayed data is synthetic.
+Only synthetic fixture data is shown.
 
 ![Desktop interface](screenshots/current-ui.png)
-![Minimum window database view](screenshots/current-database-small.png)
+![Database and tags](screenshots/current-database-small.png)
+![Permission matrix](screenshots/current-permissions.png)
 
-## Limits of this verification
+## Upgrade
 
-Programmatic desktop interactions and native mouse inspection were exercised on this machine. A clean machine without WebView2, another Windows account, actual sign-out/sign-in, all third-party controls and every browser were not tested. This is not an independent security audit. No real user vault was used for testing or included in the release.
+Use the existing complete `data` directory or start the new executable with `--data-dir` pointing at it. The package intentionally contains no user database. Before the first schema upgrade, the app creates `data/backups/before-tags-permissions-*.db`. Keep this backup if you need to restore the old version; older executables do not support v3 databases. Update MCP clients to the new executable and reconnect.
+
+## Verification boundary
+
+Tests ran on this Windows account and machine. The 25 interactive checks used a debug WebView2 attached to the local development UI; the separate 122-check suite and native editor checks ran on the production and extracted package executables. Another Windows account, an OS sign-in cycle, a machine without WebView2 and every external control/browser were not tested. This is not an independent security audit.
