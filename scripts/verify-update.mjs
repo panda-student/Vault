@@ -26,7 +26,7 @@ const check=(name,ok)=>{report.checks.push({name,passed:!!ok});assert.ok(ok,name
 const keyCommand="Add-Type -AssemblyName System.Security; $p=Join-Path $env:USERPROFILE '.codex/secrets/local-password-manager/update-signing-key.dpapi'; $b=[Security.Cryptography.ProtectedData]::Unprotect([IO.File]::ReadAllBytes($p),$null,[Security.Cryptography.DataProtectionScope]::CurrentUser); [Console]::Write([Text.Encoding]::UTF8.GetString($b)); [Array]::Clear($b,0,$b.Length)";
 const secret=(await run('powershell.exe',['-NoProfile','-Command',keyCommand],{windowsHide:true})).stdout.trim();
 const privateKey=createPrivateKey({key:Buffer.from(secret,'base64'),format:'der',type:'pkcs8'});
-const payload=Buffer.from(JSON.stringify({schema:1,version:toVersion,platform:'windows-x86_64',url:`https://github.com/panda-student/local-password-manager/releases/download/v${toVersion}/Vault.exe`,sha256:report.toSha256,size:binary.length,notes:'原生更新验收：保留标签、凭据、权限、MCP 连接与自定义数据目录。'}));
+const payload=Buffer.from(JSON.stringify({schema:1,version:toVersion,platform:'windows-x86_64',url:`https://github.com/panda-student/Vault/releases/download/v${toVersion}/Vault.exe`,sha256:report.toSha256,size:binary.length,notes:'原生更新验收：保留标签、凭据、权限、MCP 连接与自定义数据目录。'}));
 const valid={payload:payload.toString('base64'),signature:sign(null,payload,privateKey).toString('base64')};
 let activeEnvelope=valid,activeBinary=binary;
 let mode='bad-signature';
@@ -109,7 +109,7 @@ try{
  await writeFile(failingSource,'#![windows_subsystem="windows"]\nfn main(){std::process::exit(1);}\n');
  await run(join(process.env.USERPROFILE,'.cargo/bin/rustc.exe'),['--crate-name','failed_start','-C','opt-level=s','-C','strip=symbols',failingSource,'-o',failingBinary],{windowsHide:true});
  activeBinary=await readFile(failingBinary);
- const failedPayload=Buffer.from(JSON.stringify({schema:1,version:failedVersion,platform:'windows-x86_64',url:`https://github.com/panda-student/local-password-manager/releases/download/v${failedVersion}/Vault.exe`,sha256:createHash('sha256').update(activeBinary).digest('hex'),size:activeBinary.length,notes:'仅验收：启动失败应回退'}));
+ const failedPayload=Buffer.from(JSON.stringify({schema:1,version:failedVersion,platform:'windows-x86_64',url:`https://github.com/panda-student/Vault/releases/download/v${failedVersion}/Vault.exe`,sha256:createHash('sha256').update(activeBinary).digest('hex'),size:activeBinary.length,notes:'仅验收：启动失败应回退'}));
  activeEnvelope={payload:failedPayload.toString('base64'),signature:sign(null,failedPayload,privateKey).toString('base64')};
  await click('#check-update');await waitPhase('available');await click('#download-update');await waitPhase('ready');
  await click('#install-update');await click('#confirm-install-update');ws.close();await pause(1600);session=`vault-update-rollback-${process.pid}`;await connect();

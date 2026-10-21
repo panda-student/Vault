@@ -49,7 +49,7 @@ export async function runSmoke(){
  await click('#empty-trash');await until(()=>!el<HTMLButtonElement>('#empty-trash').disabled);check('cancel-native-purge-preserves-trash',(await invoke<TrashEntry[]>('list_trash')).length===beforePurge.length);
  const activeBeforePurge=(await entries()).length;
  await click('#empty-trash');await until(()=>document.querySelectorAll('[data-trash]').length===0);check('confirmed-native-purge-keeps-active',(await entries()).length===activeBeforePurge&&(await invoke<TrashEntry[]>('list_trash')).length===0);
- await click('[data-nav="mcp"]');await click('#connection-tab');await click('#show-config');const cfg=JSON.parse(el('#mcp-config').textContent!);const info=await invoke<{executable:string;dataDirectory:string;webviewVersion:string}>('desktop_info');check('mcp-settings-current-path',cfg.mcpServers['local-password-manager'].command===info.executable);
+ await click('[data-nav="mcp"]');await click('#connection-tab');await click('#show-config');const cfg=JSON.parse(el('#mcp-config').textContent!);const info=await invoke<{executable:string;dataDirectory:string;webviewVersion:string}>('desktop_info');check('mcp-settings-current-path',cfg.mcpServers['Vault'].command===info.executable);
  await click('#permissions-tab');
  for(const key of ['readMetadata','create','update','delete','fillInput','writeFile']) {
   const selector=`#permission-${key}`;check(`permission-default:${key}`,el(selector).getAttribute('aria-checked')==='true');

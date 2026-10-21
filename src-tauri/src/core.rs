@@ -251,7 +251,7 @@ impl CoreSession {
                     )
                 })?;
                 Ok(
-                    json!({"mcpServers":{"local-password-manager":{"command":executable,"args":["--mcp","--data-dir",self.directory()]}}}),
+                    json!({"mcpServers":{"Vault":{"command":executable,"args":["--mcp","--data-dir",self.directory()]}}}),
                 )
             }
             Operation::Search(args) if is_mcp => {

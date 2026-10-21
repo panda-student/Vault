@@ -12,7 +12,7 @@
 
 ## 签名发布协议
 
-稳定源：https://github.com/panda-student/local-password-manager/releases/latest/download/latest.json
+稳定源：https://github.com/panda-student/Vault/releases/latest/download/latest.json
 
 本项目使用签名信封格式（不是 Tauri 安装版更新格式）：
 
@@ -58,3 +58,5 @@ CI 迁移验收下载已发布的 v0.3.0 便携包并校验固定 SHA-256，覆�
 命名管道设置显式受保护 DACL（当前 Windows 用户与 LocalSystem），拒绝远程连接；连接端校验管道服务端进程所属 Windows 身份。暂停请求只包含随机令牌与到期时间，不包含凭据、操作或客户端配置；失败路径按令牌解除暂停，辅助进程异常终止的遗留暂停请求 5 分钟后失效。
 
 共享核心与多连接验收：`node scripts/verify-mcp-handoff.mjs`（可用 VAULT_EXE 指定程序）；更新/回退和连接保留验收：`node scripts/verify-update.mjs`（隔离签名测试源与两个 debug 构建）。
+
+仓库已更名为 `panda-student/Vault`。签名更新清单暂时保留旧仓库下载 URL，通过 GitHub 重定向下载，兼容 0.5.3 及以前版本的地址校验；新客户端同时校验新旧两种固定地址。请勿占用原仓库名，以免破坏重定向。

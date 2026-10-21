@@ -17,7 +17,7 @@ use std::{
 };
 
 const ENDPOINT: &str =
-    "https://github.com/panda-student/local-password-manager/releases/latest/download/latest.json";
+    "https://github.com/panda-student/Vault/releases/latest/download/latest.json";
 const MAX_PACKAGE: u64 = 64 * 1024 * 1024;
 const PUBLIC_KEY: &str = include_str!("../../update-public-key.txt");
 // Only debug builds can use an isolated local test server. Shipping builds have
@@ -104,10 +104,16 @@ fn decode(envelope: &Envelope, key: &str, current: &str) -> Result<Manifest> {
         return Err(invalid_update());
     }
     let expected = format!(
+        "https://github.com/panda-student/Vault/releases/download/v{}/Vault.exe",
+        manifest.version
+    );
+    // Existing clients pin the old repository URL. Keep that signed alias valid
+    // while GitHub redirects it to Vault; never accept arbitrary repositories.
+    let legacy = format!(
         "https://github.com/panda-student/local-password-manager/releases/download/v{}/Vault.exe",
         manifest.version
     );
-    if manifest.url != expected {
+    if manifest.url != expected && manifest.url != legacy {
         return Err(invalid_update());
     }
     Ok(manifest)
@@ -673,7 +679,7 @@ mod tests {
     }
     fn signed(version: &str, bytes: &[u8]) -> (Envelope, String) {
         let key = SigningKey::from_bytes(&[27; 32]);
-        let payload = serde_json::to_vec(&Manifest { schema: 1, version: version.into(), platform: "windows-x86_64".into(), url: format!("https://github.com/panda-student/local-password-manager/releases/download/v{version}/Vault.exe"), sha256: format!("{:x}", Sha256::digest(bytes)), size: bytes.len() as u64, notes: "test".into() }).unwrap();
+        let payload = serde_json::to_vec(&Manifest { schema: 1, version: version.into(), platform: "windows-x86_64".into(), url: format!("https://github.com/panda-student/Vault/releases/download/v{version}/Vault.exe"), sha256: format!("{:x}", Sha256::digest(bytes)), size: bytes.len() as u64, notes: "test".into() }).unwrap();
         (
             Envelope {
                 payload: STANDARD.encode(&payload),
@@ -690,6 +696,19 @@ mod tests {
         assert!(decode(&envelope, &STANDARD.encode([9; 32]), "1.0.0").is_err());
         envelope.payload = STANDARD.encode(b"tampered");
         assert!(decode(&envelope, &key, "1.0.0").is_err());
+    }
+    #[test]
+    fn renamed_repository_preserves_signed_legacy_updates() {
+        let (mut envelope, key) = signed("1.2.3", b"MZtest");
+        let signing_key = SigningKey::from_bytes(&[27; 32]);
+        let mut manifest = decode(&envelope, &key, "1.0.0").unwrap();
+        for (repository, accepted) in [("local-password-manager", true), ("untrusted", false)] {
+            manifest.url = format!("https://github.com/panda-student/{repository}/releases/download/v1.2.3/Vault.exe");
+            let payload = serde_json::to_vec(&manifest).unwrap();
+            envelope.payload = STANDARD.encode(&payload);
+            envelope.signature = STANDARD.encode(signing_key.sign(&payload).to_bytes());
+            assert_eq!(decode(&envelope, &key, "1.0.0").is_ok(), accepted);
+        }
     }
     #[test]
     fn signature_binds_binary_hash_size_and_stable_channel() {

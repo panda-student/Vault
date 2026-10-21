@@ -51,7 +51,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force artifacts/migration-fixture | Out-Null
-          Invoke-WebRequest 'https://github.com/panda-student/local-password-manager/releases/download/v0.3.0/vault-0.3.0.zip' -OutFile artifacts/migration-fixture/vault-0.3.0.zip
+          Invoke-WebRequest 'https://github.com/panda-student/Vault/releases/download/v0.3.0/vault-0.3.0.zip' -OutFile artifacts/migration-fixture/vault-0.3.0.zip
           $hash = (Get-FileHash artifacts/migration-fixture/vault-0.3.0.zip -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($hash -ne 'fa5412693b58c9efb7b673699e82c4579d0110ca7786f84474b8de3973fad2ff') { throw 'Migration fixture checksum mismatch.' }
           Expand-Archive artifacts/migration-fixture/vault-0.3.0.zip artifacts/migration-fixture/unpacked
