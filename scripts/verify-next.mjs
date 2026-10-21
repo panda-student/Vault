@@ -23,7 +23,7 @@ try{
  transport=new StdioClientTransport({command:executable,args:['--mcp','--data-dir',data],stderr:'pipe'});
  await client.connect(transport);transport.stderr?.on('data',b=>outputs.push(String(b)));
  const tools=(await client.listTools()).tools;
- check('nine-tools-no-network-or-purge',tools.length===9&&!tools.some(t=>/execute_api|trash|purge|restore/.test(t.name)));
+ check('twelve-tools-no-network-or-purge',tools.length===12&&!tools.some(t=>/execute_api|trash|purge/.test(t.name)));
  const created=await call('create_entries',{items:[
   {kind:'database',title:'MCP DB UVT',group:'MCP System',tags:['UVT'],database:{databaseType:'Oracle',host:'db-next.invalid',port:'1521',databaseName:'ORCL'},secret},
   {kind:'database',title:'MCP DB Local',database:{databaseType:'Redis',host:'127.0.0.1',port:'6379',databaseName:'0'},secret:''},
@@ -54,6 +54,21 @@ try{
  check('deleted-write-blocked',(await call('write_credential',{credentialId:db.id,field:'secret',target:{type:'file',path:join(root,'deleted.txt')}})).failed);
  check('purge-tool-unavailable',(await call('empty_trash',{})).failed);
  check('removed-api-tool-unavailable',(await call('execute_api_request',{credentialId:api.id,path:'/'})).failed);
+ // P1: 校验失败必须携带字段级 details，AI 才能定位字段自纠而不是盲试。
+ const detailTarget=(await call('create_entries',{kind:'password',title:'Acceptance Restore',tags:['AcceptanceTag'],secret})).value;
+ const mismatch=await call('update_entries',{id:detailTarget.id,expectedRevision:detailTarget.revision,url:'https://mismatch.invalid',services:[]});
+ check('invalid-input-details-name-field',mismatch.failed&&Array.isArray(mismatch.value.details)&&mismatch.value.details.some(d=>d.field==='services'&&typeof d.reason==='string'&&d.reason.length>0));
+ // P2: MCP 恢复垃圾桶条目（更新权限范围内），输出保持受控元数据（无备注、无密钥）。
+ check('delete-for-restore-cycle',!(await call('delete_entries',{id:detailTarget.id,expectedRevision:detailTarget.revision})).failed);
+ const restored=await call('restore_entries',{id:detailTarget.id,expectedRevision:detailTarget.revision});
+ check('mcp-restore-returns-controlled-metadata',!restored.failed&&restored.value.id===detailTarget.id&&!('notes' in restored.value)&&!('secret' in restored.value));
+ const pinned=await call('pin_entries',{id:detailTarget.id,expectedRevision:restored.value.revision,pinned:true});
+ check('mcp-pin-returns-controlled-metadata',!pinned.failed&&pinned.value.pinned===true&&pinned.value.revision===restored.value.revision+1);
+ // P2: 全局标签重命名与删除；标签无权限规则时不构成提权，应放行并全局生效。
+ check('mcp-organize-rename',!(await call('organize',{kind:'tag',name:'AcceptanceTagRenamed',previous:'AcceptanceTag'})).failed);
+ check('organize-rename-applies-globally',(await call('get_entries',{id:detailTarget.id})).value.tags.includes('AcceptanceTagRenamed'));
+ check('mcp-organize-delete',!(await call('organize',{kind:'tag',name:'',previous:'AcceptanceTagRenamed'})).failed);
+ check('organize-delete-clears-tag',(await call('get_entries',{id:detailTarget.id})).value.tags.length===0);
  check('all-ai-output-excludes-original-and-base64',outputs.every(o=>!o.includes(secret)&&!o.includes(Buffer.from(secret).toString('base64'))));
  await client.close();
  // Isolated desktop fixture: no real data, no display of protected values in reports.

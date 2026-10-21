@@ -22,7 +22,7 @@ pub(super) fn search(
 ) -> Result<Value> {
     let query = args.query.to_lowercase();
     if query.len() > 4096 {
-        return Err(AppError::invalid());
+        return Err(AppError::invalid().with("query", "搜索词长度不能超过 4096。"));
     }
     let mut entries = Vec::new();
     for summary in core.list("", args.kind)? {

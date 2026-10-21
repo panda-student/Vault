@@ -56,6 +56,66 @@ pub fn open(directory: &Path, mcp_mode: bool) -> Result<Arc<CoreSession>> {
 fn encoded(value: impl Serialize) -> Result<Value> {
     serde_json::to_value(value).map_err(|_| AppError::storage())
 }
+/// MCP organize must never relabel entries into more permissions than they had.
+/// The simulation mirrors vault::organize: the tag's permission rule moves with a
+/// rename and disappears on delete, for live entries and trash alike.
+fn guard_organize(
+    storage: &storage::StorageService,
+    name: &str,
+    previous: Option<&str>,
+) -> Result<()> {
+    use permissions::Access;
+    let Some(old) = previous else {
+        return Ok(());
+    };
+    let name = name.trim();
+    let renaming = !name.is_empty();
+    let mut settings = storage.settings()?;
+    if renaming {
+        if let Some(rule) = settings.mcp_tag_rules.remove(old) {
+            settings.mcp_tag_rules.insert(name.to_string(), rule);
+        }
+    } else {
+        settings.mcp_tag_rules.remove(old);
+    }
+    let trash = storage.list_trash()?;
+    for entry in storage
+        .list("", None)?
+        .iter()
+        .chain(trash.iter().map(|t| &t.summary))
+    {
+        if !entry.tags.iter().any(|t| t == old) {
+            continue;
+        }
+        let mut renamed_tags: Vec<String> = entry
+            .tags
+            .iter()
+            .filter(|t| *t != old)
+            .cloned()
+            .collect();
+        if renaming && !renamed_tags.iter().any(|t| t == name) {
+            renamed_tags.push(name.to_string());
+        }
+        for action in [
+            Access::Read,
+            Access::Create,
+            Access::Update,
+            Access::Delete,
+            Access::Input,
+            Access::File,
+        ] {
+            if permissions::permitted(&settings, Some(&entry.id), &renamed_tags, action)
+                && !permissions::permitted(&settings, Some(&entry.id), &entry.tags, action)
+            {
+                return Err(AppError::new(
+                    "PERMISSION_DENIED",
+                    "此操作会提升 MCP 对部分凭据的权限，已被拒绝。请在桌面端完成该重命名。",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
 impl CoreSession {
     /// Bootstrap capability binding, not an operation available to client payloads.
     pub fn bind_clipboard(&self, port: Arc<dyn ClipboardPort>) -> Result<()> {
@@ -185,13 +245,24 @@ impl CoreSession {
                 id,
                 expected_revision,
                 pinned,
-            } => encoded(storage.pin(&id, expected_revision, pinned)?),
+            } => {
+                let pinned = storage.pin(&id, expected_revision, pinned)?;
+                if is_mcp {
+                    // MCP must never receive notes or other desktop-only fields.
+                    ai::metadata(storage, &self.guard, &pinned.id)
+                } else {
+                    encoded(pinned)
+                }
+            }
             Operation::Organization => encoded(storage.organization()?),
             Operation::Organize {
                 kind,
                 name,
                 previous,
             } => {
+                if is_mcp {
+                    guard_organize(storage, &name, previous.as_deref())?;
+                }
                 storage.organize(&kind, &name, previous.as_deref())?;
                 Ok(Value::Null)
             }
@@ -199,7 +270,14 @@ impl CoreSession {
             Operation::Restore {
                 id,
                 expected_revision,
-            } => encoded(storage.restore(&id, expected_revision)?),
+            } => {
+                let restored = storage.restore(&id, expected_revision)?;
+                if is_mcp {
+                    ai::metadata(storage, &self.guard, &restored.id)
+                } else {
+                    encoded(restored)
+                }
+            }
             Operation::EmptyTrash { owner_window } => {
                 let entries = storage.list_trash()?;
                 if entries.is_empty()

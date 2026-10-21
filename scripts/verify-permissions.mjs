@@ -28,7 +28,7 @@ const defaults={readMetadata:true,create:true,update:true,delete:true,fillInput:
 const policy=async(changes={},enabled=true)=>run('python',['-c',inject,join(data,'vault.db'),JSON.stringify({mcpEnabled:enabled,mcpPermissions:{...defaults,...changes}})],{windowsHide:true});
 try {
  await client.connect(transport);
- check('default-nine-tools',(await names()).length===9);
+ check('default-twelve-tools',(await names()).length===12);
  const created=await call('create_entries',{kind:'password',title:'Permission fixture',secret});
  const {id,revision}=created.value;
  check('core-mutation-projection-is-minimal',!created.failed&&Object.keys(created.value).sort().join(',')==='id,revision,status');
@@ -52,7 +52,7 @@ try {
    const result=await call('write_credential',{credentialId:id,field:'secret',target:{type:'input',targetId:'invalid'}});
    check('file-denial-does-not-disable-window',!result.failed&&result.value.status==='target_unavailable');
   }
-  await policy();check(`same-connection-restores:${key}`,(await names()).length===9);
+  await policy();check(`same-connection-restores:${key}`,(await names()).length===12);
  }
  await policy(Object.fromEntries(Object.keys(defaults).map(key=>[key,false])));
  check('all-revoked-only-config-discovered',(await names()).join(',')==='get_mcp_config');

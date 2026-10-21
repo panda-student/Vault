@@ -261,6 +261,99 @@ fn field(id: &str, revision: i64) -> Operation {
 fn settings(session: &CoreSession) -> Settings {
     session.call(Operation::Settings).unwrap()
 }
+#[test]
+fn mcp_restore_pin_and_organize_stay_within_update_permission() {
+    let dir = tempfile::tempdir().unwrap();
+    let desktop = open(dir.path(), false).unwrap();
+    let mcp = open(dir.path(), true).unwrap();
+    // 桌面端创建带备注的条目并移入垃圾桶；MCP 恢复与置顶只应拿到受控元数据（无备注、无密钥）。
+    let es: Vec<EntrySummary> = desktop
+        .call(Operation::Create(vec![tagged("trashed", &["vault-work"])]))
+        .unwrap();
+    desktop
+        .execute(Operation::Delete(vec![EntryVersion {
+            id: es[0].id.clone(),
+            expected_revision: es[0].revision,
+        }]))
+        .unwrap();
+    let restored = mcp
+        .execute(Operation::Restore {
+            id: es[0].id.clone(),
+            expected_revision: es[0].revision,
+        })
+        .unwrap();
+    assert!(restored.get("notes").is_none());
+    assert!(restored.get("secret").is_none());
+    assert_eq!(restored["revision"].as_i64().unwrap(), es[0].revision + 1);
+    let pinned = mcp
+        .execute(Operation::Pin {
+            id: es[0].id.clone(),
+            expected_revision: es[0].revision + 1,
+            pinned: true,
+        })
+        .unwrap();
+    assert!(pinned.get("notes").is_none());
+    assert_eq!(pinned["pinned"], json!(true));
+    // MCP 重命名标签：标签上的禁止规则随重命名迁移，权限不变时应当允许。
+    let mut s = settings(&desktop);
+    s.mcp_tag_rules.insert(
+        "vault-work".into(),
+        serde_json::from_value(json!({"delete":false})).unwrap(),
+    );
+    desktop.execute(Operation::SaveSettings(s)).unwrap();
+    mcp.execute(Operation::Organize {
+        kind: "tag".into(),
+        name: "vault-team".into(),
+        previous: Some("vault-work".into()),
+    })
+    .unwrap();
+    assert!(desktop
+        .service
+        .storage
+        .summary(&es[0].id)
+        .unwrap()
+        .tags
+        .contains(&"vault-team".into()));
+    assert!(settings(&desktop).mcp_tag_rules.contains_key("vault-team"));
+    // 删除带禁止规则的标签会让凭据回落到更宽松的默认规则，构成提权，必须拒绝。
+    assert_eq!(
+        mcp.execute(Operation::Organize {
+            kind: "tag".into(),
+            name: String::new(),
+            previous: Some("vault-team".into()),
+        })
+        .unwrap_err()
+        .code,
+        "PERMISSION_DENIED"
+    );
+}
+#[test]
+fn validation_errors_carry_field_details_for_self_correction() {
+    let dir = tempfile::tempdir().unwrap();
+    let desktop = open(dir.path(), false).unwrap();
+    let mcp = open(dir.path(), true).unwrap();
+    let es: Vec<EntrySummary> = desktop
+        .call(Operation::Create(vec![tagged("detail target", &[])]))
+        .unwrap();
+    // 复现本次排查的契约冲突：非 API 凭据同时携带 services 与 url，
+    // 错误必须点名 services 字段并说明规则，AI 才能据此自纠而不是盲试。
+    let patch: EntryPatch = serde_json::from_value(json!({
+        "id":es[0].id,"expectedRevision":es[0].revision,
+        "url":"https://example.invalid","services":[]
+    }))
+    .unwrap();
+    let error = mcp.execute(Operation::Update(vec![patch])).unwrap_err();
+    assert_eq!(error.code, "INVALID_INPUT");
+    let details = error.details.as_ref().unwrap();
+    assert_eq!(details[0].field, "services");
+    assert!(details[0].reason.contains("url"));
+    // 空名称创建失败时错误必须点名 title 字段。
+    let error = mcp
+        .execute(Operation::Create(vec![input("   ")]))
+        .unwrap_err();
+    assert_eq!(error.details.as_ref().unwrap()[0].field, "title");
+}
+
 fn write(id: &str, path: &Path) -> Operation {
     Operation::Write(
         serde_json::from_value(

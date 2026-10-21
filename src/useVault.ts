@@ -1,4 +1,4 @@
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 
 export type Kind = 'password' | 'api' | 'database' | 'generic';
@@ -71,7 +71,20 @@ export function useVault() {
   const title = computed(() => page.value === 'settings' ? '设置' : page.value==='mcp'?'MCP 管理':page.value === 'trash' ? '垃圾桶' : tagFilter.value?'# '+tagFilter.value:'全部凭据');
   const config = computed(() => info.value ? JSON.stringify({ mcpServers: { 'local-password-manager': { command: info.value.executable, args: ['--mcp', '--data-dir', info.value.dataDirectory] } } }, null, 2) : '');
   let fetching = false, timer: ReturnType<typeof setInterval> | undefined, toastTimer: ReturnType<typeof setTimeout> | undefined;
-  const message = (value: unknown) => value && typeof value === 'object' && 'message' in value ? String(value.message) : '操作失败，请检查本地文件权限后重试。';
+  const message = (value: unknown) => {
+    if (!(value && typeof value === 'object')) return '操作失败，请检查本地文件权限后重试。';
+    const failure = value as { message?: unknown; details?: unknown };
+    const base = typeof failure.message === 'string' && failure.message ? failure.message : '操作失败，请检查本地文件权限后重试。';
+    if (!Array.isArray(failure.details)) return base;
+    const reasons = failure.details.map((issue) => {
+      if (issue && typeof issue === 'object' && 'field' in issue && 'reason' in issue) {
+        const named = issue as { field: unknown; reason: unknown };
+        return `${String(named.field)}：${String(named.reason)}`;
+      }
+      return '';
+    }).filter(Boolean).join('；');
+    return reasons ? `${base}（${reasons}）` : base;
+  };
   function notify(value: string) { toast.value = value; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.value = ''; }, 3000); }
   function hide() { revealed.value = null; }
   function navigate(value: typeof page.value) { if(saving.value) return; if(page.value==='mcp'&&permissionDraft.value&&value!=='mcp')notify('未应用的权限修改已保留，返回 MCP 管理可继续编辑。');stashDraft();const same=value===page.value;creating.value=false;page.value=value;query.value='';hide();if(same) loadEntry(detail.value); }
@@ -125,11 +138,22 @@ export function useVault() {
       let updated: Entry;
       const services = formKind.value === 'api' ? form.value.services.filter(service => service.url.trim()).map(service => ({...service,url:service.url.trim()})) : [];
       const payload = {...form.value, database:formKind.value==='database'?form.value.database:null, services, url:formKind.value === 'api' ? services[0]?.url ?? '' : form.value.url};
-      if (editing.value) { const { secret, ...fields } = payload; updated = await invoke('update_entry', { patch: { ...fields, id: editing.value.id, expectedRevision: editing.value.revision, ...(secret ? { secret } : {}) } }); }
+      if (editing.value) {
+        // 非 API 条目不携带 services：后端要求 services 与 url 一致，传空数组会与之冲突。
+        const { secret, services: entryServices, ...fields } = payload;
+        const patch: Record<string, unknown> = { ...fields, id: editing.value.id, expectedRevision: editing.value.revision, ...(secret ? { secret } : {}) };
+        if (formKind.value === 'api') patch.services = entryServices;
+        updated = await invoke('update_entry', { patch });
+      }
       else updated = await invoke('create_entry', { input: { ...payload, kind: formKind.value } });
       const key=draftKey();if(key) drafts.delete(key);
       switching=true;query.value='';groupFilter.value=null;tagFilter.value='';typeFilter.value='';creating.value=false;await refresh();selected.value=updated.id;loadEntry(updated,false);switching=false;notify('已加密保存');
-    } catch (value) { formError.value = message(value); } finally { switching=false;saving.value = false; }
+    } catch (value) {
+      formError.value = message(value);
+      // 保存失败必须醒目：除了表单底部的红字，同时弹出顶部 toast 并滚动到错误区域。
+      notify(formError.value);
+      void nextTick().then(() => document.getElementById('form-error')?.scrollIntoView({ block: 'nearest' }));
+    } finally { switching=false;saving.value = false; }
   }
   function askDelete() { if (!detail.value) return; hide(); pendingDelete.value = { ...detail.value }; deleteDialog.value?.showModal(); }
   async function confirmDelete() {

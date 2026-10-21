@@ -258,6 +258,51 @@ impl PermissionService {
                     Err(denied())
                 }
             }
+            Operation::Pin { id, .. } => {
+                let e = storage.summary(id)?;
+                if permitted(s, Some(&e.id), &e.tags, a) {
+                    Ok(())
+                } else {
+                    Err(denied())
+                }
+            }
+            Operation::Restore { id, .. } => {
+                let e = storage
+                    .list_trash()?
+                    .into_iter()
+                    .map(|t| t.summary)
+                    .find(|e| e.id == *id)
+                    .ok_or(AppError::new("NOT_FOUND", "垃圾桶条目不存在。"))?;
+                if permitted(s, Some(&e.id), &e.tags, a) {
+                    Ok(())
+                } else {
+                    Err(denied())
+                }
+            }
+            // Global tag management mutates every entry carrying the tag, so it
+            // requires the default update grant, not just one entry's rule.
+            Operation::Organize { name, previous, .. } => {
+                if !permitted(s, None, &[], a) {
+                    return Err(denied());
+                }
+                if let Some(old) = previous {
+                    let affected = storage
+                        .list("", None)?
+                        .into_iter()
+                        .chain(storage.list_trash()?.into_iter().map(|t| t.summary))
+                        .filter(|e| e.tags.iter().any(|t| t == old))
+                        .collect::<Vec<_>>();
+                    if name.trim().is_empty() && affected.is_empty() {
+                        return Err(AppError::new("NOT_FOUND", "标签不存在。"));
+                    }
+                    for entry in affected {
+                        if !permitted(s, Some(&entry.id), &entry.tags, a) {
+                            return Err(denied());
+                        }
+                    }
+                }
+                Ok(())
+            }
             _ => {
                 if self.available(a, s, storage)? {
                     Ok(())
@@ -292,7 +337,10 @@ pub(super) fn access(op: &Operation) -> Access {
         Operation::McpConfig => Access::Public,
         Operation::Search(_) | Operation::Read(_) => Access::Read,
         Operation::Create(_) => Access::Create,
-        Operation::Update(_) => Access::Update,
+        Operation::Update(_)
+        | Operation::Pin { .. }
+        | Operation::Restore { .. }
+        | Operation::Organize { .. } => Access::Update,
         Operation::Delete(_) => Access::Delete,
         Operation::Write(args) => {
             if args.is_file() {
@@ -310,7 +358,7 @@ pub(super) fn tool_access(name: &str, _s: &Settings) -> Option<Access> {
         "get_mcp_config" => Access::Public,
         "search_entries" | "get_entries" => Access::Read,
         "create_entries" => Access::Create,
-        "update_entries" => Access::Update,
+        "update_entries" | "restore_entries" | "pin_entries" | "organize" => Access::Update,
         "delete_entries" => Access::Delete,
         "capture_fill_target" | "fill_credential" | "write_credential" => Access::Input,
         _ => return None,
