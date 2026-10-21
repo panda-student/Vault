@@ -70,13 +70,24 @@ fn guard_organize(
     };
     let name = name.trim();
     let renaming = !name.is_empty();
-    let mut settings = storage.settings()?;
+    let settings = storage.settings()?;
+    let actions = [
+        Access::Read,
+        Access::Create,
+        Access::Update,
+        Access::Delete,
+        Access::Input,
+        Access::File,
+    ];
+    // 模拟只允许作用于「改后」一侧；「改前」必须按原始规则评估，
+    // 否则删除 deny 规则带来的权限提升在比较中不可见。
+    let mut simulated = settings.clone();
     if renaming {
-        if let Some(rule) = settings.mcp_tag_rules.remove(old) {
-            settings.mcp_tag_rules.insert(name.to_string(), rule);
+        if let Some(rule) = simulated.mcp_tag_rules.remove(old) {
+            simulated.mcp_tag_rules.insert(name.to_string(), rule);
         }
     } else {
-        settings.mcp_tag_rules.remove(old);
+        simulated.mcp_tag_rules.remove(old);
     }
     let trash = storage.list_trash()?;
     for entry in storage
@@ -96,15 +107,8 @@ fn guard_organize(
         if renaming && !renamed_tags.iter().any(|t| t == name) {
             renamed_tags.push(name.to_string());
         }
-        for action in [
-            Access::Read,
-            Access::Create,
-            Access::Update,
-            Access::Delete,
-            Access::Input,
-            Access::File,
-        ] {
-            if permissions::permitted(&settings, Some(&entry.id), &renamed_tags, action)
+        for action in actions {
+            if permissions::permitted(&simulated, Some(&entry.id), &renamed_tags, action)
                 && !permissions::permitted(&settings, Some(&entry.id), &entry.tags, action)
             {
                 return Err(AppError::new(

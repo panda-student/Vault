@@ -474,22 +474,11 @@ fn core_denies_all_desktop_only_operations_even_if_mcp_adapter_misroutes() {
         Operation::Settings,
         Operation::SaveSettings(Settings::default()),
         Operation::ListTrash,
-        Operation::Restore {
-            id: "missing".into(),
-            expected_revision: 1,
-        },
+        // Restore/Pin/Organize 已按 P2 设计开放为 MCP 的 Update 权限操作，
+        // 不再属于 desktop-only 集合，其放行与提权防护由
+        // mcp_restore_pin_and_organize_stay_within_update_permission 单独覆盖。
         Operation::EmptyTrash { owner_window: 0 },
         Operation::Organization,
-        Operation::Organize {
-            kind: "group".into(),
-            name: "forbidden".into(),
-            previous: None,
-        },
-        Operation::Pin {
-            id: "missing".into(),
-            expected_revision: 1,
-            pinned: true,
-        },
         Operation::StartupEnabled(dir.path().join("fake.exe")),
         Operation::SetStartup {
             executable: dir.path().join("fake.exe"),
