@@ -69,6 +69,13 @@ try{
  check('organize-rename-applies-globally',(await call('get_entries',{id:detailTarget.id})).value.tags.includes('AcceptanceTagRenamed'));
  check('mcp-organize-delete',!(await call('organize',{kind:'tag',name:'',previous:'AcceptanceTagRenamed'})).failed);
  check('organize-delete-clears-tag',(await call('get_entries',{id:detailTarget.id})).value.tags.length===0);
+ const beforeEmptyTagDelete=(await call('get_entries',{id:detailTarget.id})).value;
+ check('mcp-create-unused-tag',!(await call('organize',{kind:'tag',name:'UnusedCatalogTag'})).failed);
+ check('mcp-delete-unused-tag-directly',!(await call('organize',{kind:'tag',name:'',previous:'UnusedCatalogTag'})).failed);
+ const afterEmptyTagDelete=(await call('get_entries',{id:detailTarget.id})).value;
+ check('unused-tag-delete-preserves-entry',JSON.stringify(beforeEmptyTagDelete)===JSON.stringify(afterEmptyTagDelete));
+ const missingTag=await call('organize',{kind:'tag',name:'',previous:'UnusedCatalogTag'});
+ check('deleted-tag-is-not-found',missingTag.failed&&missingTag.value.code==='NOT_FOUND');
  check('all-ai-output-excludes-original-and-base64',outputs.every(o=>!o.includes(secret)&&!o.includes(Buffer.from(secret).toString('base64'))));
  await client.close();
  // Isolated desktop fixture: no real data, no display of protected values in reports.

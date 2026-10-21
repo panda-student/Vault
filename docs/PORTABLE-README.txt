@@ -1,4 +1,4 @@
-本地密码库 0.5.0 · Windows x64
+﻿本地密码库 0.5.2 · Windows x64
 
 解压后启动 Vault.exe。需要系统已有 WebView2 Runtime，不需要 Node.js/Python/Rust。
 数据库默认位于程序旁 data；首次启动为空库。

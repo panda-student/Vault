@@ -262,6 +262,78 @@ fn settings(session: &CoreSession) -> Settings {
     session.call(Operation::Settings).unwrap()
 }
 #[test]
+fn mcp_can_delete_catalog_only_tag_without_touching_credentials() {
+    let dir = tempfile::tempdir().unwrap();
+    let desktop = open(dir.path(), false).unwrap();
+    let mcp = open(dir.path(), true).unwrap();
+    let entries: Vec<EntrySummary> = desktop
+        .call(Operation::Create(vec![tagged("keep", &["keep-tag"])]))
+        .unwrap();
+    desktop
+        .execute(Operation::Organize {
+            kind: "tag".into(),
+            name: "empty-tag".into(),
+            previous: None,
+        })
+        .unwrap();
+    let mut rules = settings(&desktop);
+    rules.mcp_permissions.update = false;
+    desktop
+        .execute(Operation::SaveSettings(rules.clone()))
+        .unwrap();
+    assert_eq!(
+        mcp.execute(Operation::Organize {
+            kind: "tag".into(),
+            name: String::new(),
+            previous: Some("empty-tag".into()),
+        })
+        .unwrap_err()
+        .code,
+        "PERMISSION_DENIED"
+    );
+    let org: Organization = desktop.call(Operation::Organization).unwrap();
+    assert!(org.tags.contains(&"empty-tag".into()));
+    rules.mcp_permissions.update = true;
+    rules.mcp_tag_rules.insert(
+        "empty-tag".into(),
+        serde_json::from_value(json!({"delete":false})).unwrap(),
+    );
+    rules.mcp_tag_rules.insert(
+        "keep-tag".into(),
+        serde_json::from_value(json!({"writeFile":false})).unwrap(),
+    );
+    desktop.execute(Operation::SaveSettings(rules)).unwrap();
+    mcp.execute(Operation::Organize {
+        kind: "tag".into(),
+        name: String::new(),
+        previous: Some("empty-tag".into()),
+    })
+    .unwrap();
+    let org: Organization = desktop.call(Operation::Organization).unwrap();
+    assert_eq!(org.tags, vec!["keep-tag"]);
+    let rules = settings(&desktop);
+    assert!(!rules.mcp_tag_rules.contains_key("empty-tag"));
+    assert!(rules.mcp_tag_rules.contains_key("keep-tag"));
+    let unchanged = desktop.service.storage.summary(&entries[0].id).unwrap();
+    assert_eq!(unchanged.revision, entries[0].revision);
+    assert_eq!(unchanged.tags, entries[0].tags);
+    assert_eq!(
+        mcp.execute(Operation::Organize {
+            kind: "tag".into(),
+            name: String::new(),
+            previous: Some("empty-tag".into()),
+        })
+        .unwrap_err()
+        .code,
+        "NOT_FOUND"
+    );
+    drop(mcp);
+    drop(desktop);
+    let reopened = open(dir.path(), false).unwrap();
+    let org: Organization = reopened.call(Operation::Organization).unwrap();
+    assert_eq!(org.tags, vec!["keep-tag"]);
+}
+#[test]
 fn mcp_restore_pin_and_organize_stay_within_update_permission() {
     let dir = tempfile::tempdir().unwrap();
     let desktop = open(dir.path(), false).unwrap();

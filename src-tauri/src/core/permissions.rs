@@ -292,7 +292,11 @@ impl PermissionService {
                         .chain(storage.list_trash()?.into_iter().map(|t| t.summary))
                         .filter(|e| e.tags.iter().any(|t| t == old))
                         .collect::<Vec<_>>();
-                    if name.trim().is_empty() && affected.is_empty() {
+                    // Empty tags can intentionally exist in the persisted catalog.
+                    // Entry references are used for authorization, not existence.
+                    if name.trim().is_empty()
+                        && !storage.organization()?.tags.iter().any(|tag| tag == old)
+                    {
                         return Err(AppError::new("NOT_FOUND", "标签不存在。"));
                     }
                     for entry in affected {
