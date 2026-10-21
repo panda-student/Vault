@@ -24,7 +24,7 @@ try{
  const path=join(root,'local-secret-check.txt');await call('write_credential',{credentialId:a.id,field:'secret',target:{type:'file',path}});
  check('secret-survives-schema-migration',(await readFile(path,'utf8'))==='FAKE_LEGACY_ONLY_777');
  await client.close();
- const migrated=new DatabaseSync(join(data,'vault.db'),{readOnly:true});check('schema-two-and-trash-table',migrated.prepare('PRAGMA user_version').get().user_version===2&&!!migrated.prepare("SELECT name FROM sqlite_master WHERE name='trash'").get());migrated.close();
+ const migrated=new DatabaseSync(join(data,'vault.db'),{readOnly:true});check('schema-three-and-trash-table',migrated.prepare('PRAGMA user_version').get().user_version===3&&!!migrated.prepare("SELECT name FROM sqlite_master WHERE name='trash'").get());migrated.close();
  report.executableSha256=createHash('sha256').update(await readFile(newExe)).digest('hex');report.passed=true;
 }catch(e){report.error=String(e);process.exitCode=1;console.error(report.error);}
 finally{try{await client?.close();}catch{}await writeFile('docs/evidence/migration-verification.json',JSON.stringify(report,null,2));}

@@ -1,4 +1,7 @@
+#[cfg(test)]
+mod migration_tests;
 mod organization;
+mod policy;
 pub use organization::Organization;
 mod trash;
 use crate::{
@@ -137,7 +140,7 @@ impl Vault {
             )?;
             key
         } else {
-            if version != 1 && version != 2 {
+            if version != 1 && version != 2 && version != 3 {
                 return Err(AppError::new(
                     "UNSUPPORTED_DATABASE",
                     "密码库格式不受支持，原文件未被覆盖。",
@@ -162,9 +165,23 @@ impl Vault {
             }
             key
         };
-        transaction.execute_batch("CREATE TABLE IF NOT EXISTS trash (id TEXT PRIMARY KEY, encrypted BLOB NOT NULL, revision INTEGER NOT NULL, pinned INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER NOT NULL); PRAGMA user_version=2;")?;
+        transaction.execute_batch("CREATE TABLE IF NOT EXISTS trash (id TEXT PRIMARY KEY, encrypted BLOB NOT NULL, revision INTEGER NOT NULL, pinned INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER NOT NULL);")?;
+        if version < 2 {
+            transaction.execute_batch("PRAGMA user_version=2;")?;
+        }
         transaction.commit()?;
-        Ok(Self { directory, key })
+        if existed && version < 3 {
+            let backups = directory.join("backups");
+            std::fs::create_dir_all(&backups).map_err(|_| AppError::storage())?;
+            let backup = backups.join(format!(
+                "before-tags-permissions-{}.db",
+                uuid::Uuid::new_v4()
+            ));
+            connection.execute("VACUUM INTO ?1", [backup.to_string_lossy().as_ref()])?;
+        }
+        let vault = Self { directory, key };
+        vault.migrate_labels()?;
+        Ok(vault)
     }
 
     pub fn directory(&self) -> &Path {
@@ -223,6 +240,7 @@ impl Vault {
                 service.protocol = ApiProtocol::Custom;
             }
         }
+        Self::normalize_labels(&mut value);
         Ok(value)
     }
     fn encode(&self, row: &Row, value: &EntryInput) -> Result<Vec<u8>> {
@@ -230,6 +248,7 @@ impl Vault {
         crypto::encrypt(&self.key, &row.aad(), &plaintext)
     }
     fn normalize_services(value: &mut EntryInput) -> Result<()> {
+        Self::normalize_labels(value);
         value.group = value.group.trim().into();
         value.tags = value.tags.iter().map(|t| t.trim().to_string()).collect();
         let mut tags = std::collections::HashSet::new();
@@ -267,11 +286,11 @@ impl Vault {
     }
     fn validate(value: &EntryInput) -> Result<()> {
         if value.group.len() > 256
-            || value.tags.len() > 30
+            || value.tags.len() > 64
             || value
                 .tags
                 .iter()
-                .any(|t| t.trim().is_empty() || t.len() > 128)
+                .any(|t| t.trim().is_empty() || t.len() > 256)
             || (value.kind != Kind::Database && value.database.is_some())
         {
             return Err(AppError::invalid());
@@ -375,10 +394,19 @@ impl Vault {
         tx.commit()?;
         Ok(result)
     }
+    #[cfg(test)]
     pub fn create(&self, value: EntryInput) -> Result<EntrySummary> {
         Ok(self.create_many(vec![value])?.remove(0))
     }
+    #[cfg(test)]
     pub fn create_many(&self, values: Vec<EntryInput>) -> Result<Vec<EntrySummary>> {
+        self.create_many_checked(values, |_, _, _| Ok(()))
+    }
+    pub fn create_many_checked(
+        &self,
+        values: Vec<EntryInput>,
+        check: impl Fn(&Settings, Option<&EntrySummary>, &EntrySummary) -> Result<()>,
+    ) -> Result<Vec<EntrySummary>> {
         self.write_many(values, |connection, mut value| {
         value.title = value.title.trim().into();
         if value.kind == Kind::Api && !value.url.is_empty() && value.services.first().is_some_and(|first| first.url.trim()!=value.url.trim()) { return Err(AppError::invalid()); }
@@ -394,14 +422,24 @@ impl Vault {
             updated_at: time,
         };
         let packed = self.encode(&row, &value)?;
+        check(&self.settings_on(connection)?,None,&row.summary(&value))?;
         connection.execute("INSERT INTO entries (id,encrypted,revision,pinned,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,?6)",params![row.id,packed,row.revision,row.pinned,row.created_at,row.updated_at])?;
         Ok(row.summary(&value))
         })
     }
+    #[cfg(test)]
     pub fn update(&self, patch: EntryPatch) -> Result<EntrySummary> {
         Ok(self.update_many(vec![patch])?.remove(0))
     }
+    #[cfg(test)]
     pub fn update_many(&self, values: Vec<EntryPatch>) -> Result<Vec<EntrySummary>> {
+        self.update_many_checked(values, |_, _, _| Ok(()))
+    }
+    pub fn update_many_checked(
+        &self,
+        values: Vec<EntryPatch>,
+        check: impl Fn(&Settings, Option<&EntrySummary>, &EntrySummary) -> Result<()>,
+    ) -> Result<Vec<EntrySummary>> {
         let mut ids = std::collections::HashSet::new();
         if values.iter().any(|v| !ids.insert(&v.id)) {
             return Err(AppError::invalid());
@@ -412,6 +450,7 @@ impl Vault {
                 return Err(AppError::conflict());
             }
             let mut value = self.decode(&row)?;
+            let original = row.summary(&value);
             let old_secret = Zeroizing::new(value.secret.clone());
             if let Some(v) = patch.title {
                 value.title = v.trim().into();
@@ -454,6 +493,11 @@ impl Vault {
                 value.notes = v;
             }
             Self::validate(&value)?;
+            check(
+                &self.settings_on(connection)?,
+                Some(&original),
+                &row.summary(&value),
+            )?;
             if old_secret.as_str() != value.secret {
                 self.retain_protected_value(connection, &row.id, &old_secret)?;
             }
@@ -486,6 +530,7 @@ impl Vault {
         tx.commit()?;
         Ok(row.summary(&value))
     }
+    #[cfg(test)]
     pub fn delete(&self, id: &str, expected_revision: i64) -> Result<()> {
         self.delete_many(vec![EntryVersion {
             id: id.to_owned(),
@@ -493,13 +538,23 @@ impl Vault {
         }])
         .map(|_| ())
     }
+    #[cfg(test)]
     pub fn delete_many(&self, values: Vec<EntryVersion>) -> Result<Vec<String>> {
+        self.delete_many_checked(values, |_, _, _| Ok(()))
+    }
+    pub fn delete_many_checked(
+        &self,
+        values: Vec<EntryVersion>,
+        check: impl Fn(&Settings, Option<&EntrySummary>, &EntrySummary) -> Result<()>,
+    ) -> Result<Vec<String>> {
         let mut ids = std::collections::HashSet::new();
         if values.iter().any(|v| !ids.insert(&v.id)) {
             return Err(AppError::invalid());
         }
         self.write_many(values, |connection, item| {
             let row = Self::find(connection, &item.id)?;
+            let original = row.summary(&self.decode(&row)?);
+            check(&self.settings_on(connection)?,Some(&original),&original)?;
             if row.revision != item.expected_revision {
                 return Err(AppError::conflict());
             }
@@ -517,19 +572,13 @@ impl Vault {
         })
     }
     pub fn settings(&self) -> Result<Settings> {
-        let bytes: Vec<u8> = self.connection()?.query_row(
-            "SELECT value FROM metadata WHERE name='settings'",
-            [],
-            |row| row.get(0),
-        )?;
-        serde_json::from_slice(&bytes).map_err(|_| AppError::storage())
+        self.settings_on(&self.connection()?)
     }
     pub fn save_settings(&self, settings: &Settings) -> Result<()> {
-        let bytes = serde_json::to_vec(settings).map_err(|_| AppError::invalid())?;
-        self.connection()?.execute(
-            "UPDATE metadata SET value=?1 WHERE name='settings'",
-            [bytes],
-        )?;
+        let mut connection = self.connection()?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        self.save_settings_on(&tx, settings)?;
+        tx.commit()?;
         Ok(())
     }
 }

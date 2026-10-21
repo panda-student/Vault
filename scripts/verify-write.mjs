@@ -64,7 +64,9 @@ try{
   const prefix=editor==='ise'?'# fixture-token=':'fixture-token=';
   await writeFile(file,(editor==='ise'?'\uFEFF':'')+prefix);
   await helper('Launch',state,editor,file);states.push(state);
-  const focus=await helper('Focus',state);
+  let focus=await helper('Focus',state);
+  // No credential has been captured or sent yet; retry fixture focus only.
+  for(let attempt=0;attempt<2&&!focus.focused;attempt++)focus=await helper('Focus',state);
   check(`Actual ${editor} has keyboard focus`,focus.focused===true);
   report[editor]={controlType:focus.controlType};
   const captured=await call('capture_fill_target',{});

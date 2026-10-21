@@ -19,6 +19,14 @@ pub struct WriteArgs {
     field: String,
     target: Destination,
 }
+impl WriteArgs {
+    pub(crate) fn credential_id(&self) -> &str {
+        &self.credential_id
+    }
+    pub(crate) fn is_file(&self) -> bool {
+        matches!(self.target, Destination::File { .. })
+    }
+}
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum Destination {

@@ -32,7 +32,7 @@ try{
  check('batch-create-database-and-api',!created.failed&&created.value.results.length===3);
  const [db,local,api]=created.value.results;
  const meta=await call('get_entries',{id:db.id});
- check('metadata-shows-group-tags-database-not-secret',!meta.failed&&meta.value.group==='MCP System'&&meta.value.database.databaseName==='ORCL'&&!('secret' in meta.value)&&!('notes' in meta.value));
+ check('metadata-shows-group-tags-database-not-secret',!meta.failed&&meta.value.tags.includes('MCP System')&&meta.value.database.databaseName==='ORCL'&&!('secret' in meta.value)&&!('notes' in meta.value));
  for(const query of ['MCP System','UVT','db-next.invalid']){
   const r=await call('search_entries',{query});check(`search:${query}`,r.value.entries.some(e=>e.id===db.id));
  }
@@ -44,7 +44,7 @@ try{
  const poisoned=await call('update_entries',{id:db.id,expectedRevision:1,group:secret,tags:[secret]});
  check('metadata-update',!poisoned.failed);
  const guarded=await call('get_entries',{id:db.id});
- check('new-fields-filter-protected-values',guarded.value.group===null&&guarded.value.tags[0]===null);
+ check('new-fields-filter-protected-values',guarded.value.group===''&&guarded.value.tags.some(t=>t===null));
  const oracle=await call('search_entries',{query:secret});
  check('redacted-fields-not-search-oracle',oracle.value.entries.length===0);
  const bad=await call('delete_entries',{items:[{id:db.id,expectedRevision:2},{id:api.id,expectedRevision:999}]});

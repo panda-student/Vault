@@ -2,6 +2,7 @@
 !/.gitignore
 !/README.md
 !/LICENSE
+!/NOTICE
 !/SECURITY.md
 !/THIRD_PARTY_NOTICES.txt
 !/package.json
@@ -28,6 +29,8 @@
 !/scripts/tauri.mjs
 !/scripts/package-portable.ps1
 !/scripts/verify-next.mjs
+!/scripts/verify-permissions.mjs
+!/scripts/verify-resource-ui.mjs
 !/scripts/verify-package.mjs
 !/scripts/verify-migration.mjs
 !/scripts/verify-write.mjs
@@ -43,6 +46,8 @@
 !/docs/screenshots/
 !/docs/PORTABLE-README.txt
 !/docs/RELEASE.md
+!/docs/ARCHITECTURE.md
+!/docs/prototypes/
 
 **/node_modules/
 **/target/

@@ -63,11 +63,11 @@ fn fixture_poll(app: tauri::AppHandle, state: tauri::State<'_, State>) -> Option
         app.exit(0);
         return None;
     }
-    if matches!(command.action, Action::Focus | Action::Prefix) {
-        if let Some(window) = app.get_webview_window("fixture") {
-            let _ = window.show();
-            let _ = window.set_focus();
-        }
+    if matches!(command.action, Action::Focus | Action::Prefix)
+        && let Some(window) = app.get_webview_window("fixture")
+    {
+        let _ = window.show();
+        let _ = window.set_focus();
     }
     Some(command)
 }

@@ -182,10 +182,9 @@ fn accessibility_identity() -> Option<(i32, Vec<i32>)> {
         }
         if let Ok(pattern) =
             element.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId)
+            && pattern.CurrentIsReadOnly().ok()?.as_bool()
         {
-            if pattern.CurrentIsReadOnly().ok()?.as_bool() {
-                return Some((-1, vec![]));
-            }
+            return Some((-1, vec![]));
         }
         let array = element.GetRuntimeId().ok()?;
         if array.is_null() {

@@ -64,6 +64,9 @@ $handle=[IntPtr]$state.handle
 if($owner -ne $state.pid){throw 'Audit window owner changed'}
 $process=Get-Process -Id $owner
 if($state.editor -eq 'notepad'){
+ # Tabbed Notepad updates its window title asynchronously after save. Wait for
+ # the exact fixture title; never relax ownership or accept another active tab.
+ for($attempt=0;$attempt -lt 20 -and ![NativeWriteAudit]::Title($handle).Contains((Split-Path $state.file -Leaf));$attempt++) { Start-Sleep -Milliseconds 100 }
  if($process.ProcessName -ne 'Notepad' -or ![NativeWriteAudit]::Title($handle).Contains((Split-Path $state.file -Leaf))){throw 'Not the isolated Notepad tab'}
 } elseif($process.ProcessName -ne 'powershell_ise') {throw 'Not the isolated editor'}
 [NativeWriteAudit]::ShowWindow($handle,9)|Out-Null

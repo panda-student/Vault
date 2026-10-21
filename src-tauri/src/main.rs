@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod ai_output;
+mod core;
 mod credential_write;
 mod crypto;
 mod error;
@@ -8,6 +9,10 @@ mod fixture;
 mod mcp;
 mod startup;
 mod vault;
+use core::{
+    CoreSession, EntryInput, EntryPatch, EntrySummary, FieldRequest, Kind, Operation, Search,
+    Settings,
+};
 use error::{AppError, Result};
 use serde::Serialize;
 use std::{
@@ -23,9 +28,17 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
-use vault::{EntryInput, EntryPatch, EntrySummary, Kind, Settings, Vault};
+struct DesktopClipboard(tauri::AppHandle);
+impl core::ClipboardPort for DesktopClipboard {
+    fn write_text(&self, text: String) -> Result<()> {
+        self.0
+            .clipboard()
+            .write_text(text)
+            .map_err(|_| AppError::new("CLIPBOARD_ERROR", "无法写入系统剪贴板，请重试。"))
+    }
+}
 struct AppState {
-    vault: Arc<Vault>,
+    core: Arc<CoreSession>,
     executable: PathBuf,
     smoke_report: Option<PathBuf>,
     smoke_finished: AtomicBool,
@@ -46,12 +59,14 @@ fn desktop_info(state: tauri::State<'_, AppState>) -> Result<DesktopInfo> {
     Ok(DesktopInfo {
         version: env!("CARGO_PKG_VERSION"),
         executable: state.executable.clone(),
-        data_directory: state.vault.directory().to_owned(),
+        data_directory: state.core.directory().to_owned(),
         webview_version: tauri::webview_version()
             .map_err(|_| AppError::new("WEBVIEW_ERROR", "无法读取 WebView2 版本。"))?,
         smoke_test: state.smoke_report.is_some(),
-        settings: state.vault.settings()?,
-        startup_enabled: startup::enabled(&state.executable, state.vault.directory())?,
+        settings: state.core.call(Operation::Settings)?,
+        startup_enabled: state
+            .core
+            .call(Operation::StartupEnabled(state.executable.clone()))?,
     })
 }
 #[tauri::command]
@@ -60,15 +75,25 @@ fn list_entries(
     query: Option<String>,
     kind: Option<Kind>,
 ) -> Result<Vec<EntrySummary>> {
-    state.vault.list(query.as_deref().unwrap_or(""), kind)
+    let result = state.core.execute(Operation::Search(Search::new(
+        query.unwrap_or_default(),
+        kind,
+    )))?;
+    serde_json::from_value(result["entries"].clone()).map_err(|_| AppError::storage())
 }
 #[tauri::command]
 fn create_entry(state: tauri::State<'_, AppState>, input: EntryInput) -> Result<EntrySummary> {
-    state.vault.create(input)
+    Ok(state
+        .core
+        .call::<Vec<EntrySummary>>(Operation::Create(vec![input]))?
+        .remove(0))
 }
 #[tauri::command]
 fn update_entry(state: tauri::State<'_, AppState>, patch: EntryPatch) -> Result<EntrySummary> {
-    state.vault.update(patch)
+    Ok(state
+        .core
+        .call::<Vec<EntrySummary>>(Operation::Update(vec![patch]))?
+        .remove(0))
 }
 #[tauri::command]
 fn pin_entry(
@@ -77,7 +102,11 @@ fn pin_entry(
     expected_revision: i64,
     pinned: bool,
 ) -> Result<EntrySummary> {
-    state.vault.pin(&id, expected_revision, pinned)
+    state.core.call(Operation::Pin {
+        id,
+        expected_revision,
+        pinned,
+    })
 }
 #[tauri::command]
 fn delete_entry(
@@ -85,11 +114,17 @@ fn delete_entry(
     id: String,
     expected_revision: i64,
 ) -> Result<()> {
-    state.vault.delete(&id, expected_revision)
+    state
+        .core
+        .execute(Operation::Delete(vec![core::EntryVersion {
+            id,
+            expected_revision,
+        }]))?;
+    Ok(())
 }
 #[tauri::command]
-fn get_organization(state: tauri::State<'_, AppState>) -> Result<vault::Organization> {
-    state.vault.organization()
+fn get_organization(state: tauri::State<'_, AppState>) -> Result<core::Organization> {
+    state.core.call(Operation::Organization)
 }
 #[tauri::command]
 fn organize(
@@ -98,11 +133,15 @@ fn organize(
     name: String,
     previous: Option<String>,
 ) -> Result<()> {
-    state.vault.organize(&kind, &name, previous.as_deref())
+    state.core.call(Operation::Organize {
+        kind,
+        name,
+        previous,
+    })
 }
 #[tauri::command]
-fn list_trash(state: tauri::State<'_, AppState>) -> Result<Vec<vault::TrashEntry>> {
-    state.vault.list_trash()
+fn list_trash(state: tauri::State<'_, AppState>) -> Result<Vec<core::TrashEntry>> {
+    state.core.call(Operation::ListTrash)
 }
 #[tauri::command]
 fn restore_entry(
@@ -110,50 +149,15 @@ fn restore_entry(
     id: String,
     expected_revision: i64,
 ) -> Result<EntrySummary> {
-    state.vault.restore(&id, expected_revision)
+    state.core.call(Operation::Restore {
+        id,
+        expected_revision,
+    })
 }
 #[tauri::command]
 fn empty_trash(window: tauri::WebviewWindow, state: tauri::State<'_, AppState>) -> Result<usize> {
-    use windows::{
-        Win32::UI::WindowsAndMessaging::{
-            IDYES, MB_DEFBUTTON2, MB_ICONWARNING, MB_YESNO, MessageBoxW,
-        },
-        core::PCWSTR,
-    };
-    let items = state.vault.list_trash()?;
-    if items.is_empty() {
-        return Ok(0);
-    }
-    let text: Vec<u16> = format!(
-        "将永久删除垃圾桶中的全部 {} 条凭据。此操作无法恢复。是否继续？",
-        items.len()
-    )
-    .encode_utf16()
-    .chain(Some(0))
-    .collect();
-    let title: Vec<u16> = "确认永久清空垃圾桶".encode_utf16().chain(Some(0)).collect();
-    let hwnd = window.hwnd().map_err(|_| AppError::storage())?;
-    // Native human confirmation; no caller-provided boolean can bypass this dialog.
-    let answer = unsafe {
-        MessageBoxW(
-            Some(windows::Win32::Foundation::HWND(hwnd.0)),
-            PCWSTR(text.as_ptr()),
-            PCWSTR(title.as_ptr()),
-            MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2,
-        )
-    };
-    if answer != IDYES {
-        return Ok(0);
-    }
-    state.vault.empty_trash(
-        items
-            .into_iter()
-            .map(|e| vault::EntryVersion {
-                id: e.summary.id,
-                expected_revision: e.summary.revision,
-            })
-            .collect(),
-    )
+    let owner_window = window.hwnd().map_err(|_| AppError::storage())?.0 as isize;
+    state.core.call(Operation::EmptyTrash { owner_window })
 }
 #[tauri::command]
 fn read_secret(
@@ -161,54 +165,49 @@ fn read_secret(
     id: String,
     expected_revision: i64,
 ) -> Result<String> {
-    let detail = state.vault.get(&id)?;
-    if detail.summary.revision != expected_revision {
-        return Err(AppError::conflict());
-    }
-    Ok(detail.secret)
+    state.core.call(Operation::ReadField(FieldRequest {
+        id,
+        expected_revision,
+        field: "secret".into(),
+        service_id: None,
+    }))
 }
 #[tauri::command]
 fn copy_field(
-    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     id: String,
     expected_revision: i64,
     field: String,
     service_id: Option<String>,
 ) -> Result<()> {
-    let entry = state.vault.get(&id)?;
-    if entry.summary.revision != expected_revision {
-        return Err(AppError::conflict());
-    }
-    let value = match field.as_str() {
-        "account" => entry.summary.account,
-        "url" if service_id.is_some() => entry.summary.service(service_id.as_deref())?.url.clone(),
-        "url" => entry.summary.url,
-        "secret" => entry.secret,
-        _ => return Err(AppError::invalid()),
-    };
-    app.clipboard()
-        .write_text(value)
-        .map_err(|_| AppError::new("CLIPBOARD_ERROR", "无法写入系统剪贴板，请重试。"))
+    state.core.call(Operation::CopyField(FieldRequest {
+        id,
+        expected_revision,
+        field,
+        service_id,
+    }))
 }
 #[tauri::command]
-fn copy_text(app: tauri::AppHandle, text: String) -> Result<()> {
-    if text.len() > 65536 {
-        return Err(AppError::invalid());
-    }
-    app.clipboard()
-        .write_text(text)
-        .map_err(|_| AppError::new("CLIPBOARD_ERROR", "无法写入系统剪贴板。"))
+fn copy_text(state: tauri::State<'_, AppState>, text: String) -> Result<()> {
+    state.core.call(Operation::CopyText(text))
 }
 #[tauri::command]
 fn save_settings(state: tauri::State<'_, AppState>, settings: Settings) -> Result<Settings> {
-    state.vault.save_settings(&settings)?;
-    Ok(settings)
+    state.core.call(Operation::SaveSettings(settings))
+}
+#[tauri::command]
+fn permission_preview(
+    state: tauri::State<'_, AppState>,
+    settings: Settings,
+) -> Result<serde_json::Value> {
+    state.core.execute(Operation::PermissionPreview(settings))
 }
 #[tauri::command]
 fn set_startup(state: tauri::State<'_, AppState>, enabled: bool) -> Result<bool> {
-    startup::set(enabled, &state.executable, state.vault.directory())?;
-    startup::enabled(&state.executable, state.vault.directory())
+    state.core.call(Operation::SetStartup {
+        executable: state.executable.clone(),
+        enabled,
+    })
 }
 #[tauri::command]
 fn smoke_clipboard(
@@ -226,8 +225,22 @@ fn smoke_clipboard(
         Err(_) if clipboard_is_empty() => None,
         Err(_) => return Ok(None),
     };
-    let secret = state.vault.get(&id)?.secret;
-    let written = app.clipboard().write_text(secret.clone());
+    let entry = state
+        .core
+        .call::<Vec<EntrySummary>>(Operation::Read(vec![id.clone()]))?
+        .remove(0);
+    let secret: String = state.core.call(Operation::ReadField(FieldRequest {
+        id: id.clone(),
+        expected_revision: entry.revision,
+        field: "secret".into(),
+        service_id: None,
+    }))?;
+    let written = state.core.execute(Operation::CopyField(FieldRequest {
+        id,
+        expected_revision: entry.revision,
+        field: "secret".into(),
+        service_id: None,
+    }));
     let matches = written.is_ok()
         && app
             .clipboard()
@@ -341,6 +354,7 @@ fn desktop(
             copy_field,
             copy_text,
             save_settings,
+            permission_preview,
             set_startup,
             smoke_clipboard,
             smoke_window_cycle,
@@ -349,6 +363,9 @@ fn desktop(
         ])
         .setup(move |app| {
             let state = app.state::<AppState>();
+            state
+                .core
+                .bind_clipboard(Arc::new(DesktopClipboard(app.handle().clone())))?;
             let is_smoke = state.smoke_report.is_some();
             let builder =
                 WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
@@ -357,7 +374,7 @@ fn desktop(
                     .min_inner_size(900.0, 580.0)
                     .focused(!is_smoke)
                     .visible(!background)
-                    .data_directory(state.vault.directory().join("webview"));
+                    .data_directory(state.core.directory().join("webview"));
             // A debug build can expose only its explicitly selected fixture window
             // for native UI inspection. Release builds do not include this hook.
             #[cfg(debug_assertions)]
@@ -370,16 +387,15 @@ fn desktop(
             let window = builder.build()?;
             let observed = window.clone();
             window.on_window_event(move |event| {
-                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                    if observed
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event
+                    && observed
                         .state::<AppState>()
-                        .vault
-                        .settings()
+                        .core
+                        .call::<Settings>(Operation::Settings)
                         .is_ok_and(|s| s.close_to_tray)
-                    {
-                        api.prevent_close();
-                        let _ = observed.hide();
-                    }
+                {
+                    api.prevent_close();
+                    let _ = observed.hide();
                 }
             });
             let open = MenuItem::with_id(app, "open", "打开本地密码库", true, None::<&str>)?;
@@ -501,13 +517,13 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     if is_mcp && (report.is_some() || background) {
         return Err("MCP cannot be combined with desktop arguments".into());
     }
-    let vault = Arc::new(Vault::open(&directory)?);
+    let core = core::open(&directory, is_mcp)?;
     if is_mcp {
-        return mcp::run(vault);
+        return mcp::run(core);
     }
     desktop(
         AppState {
-            vault,
+            core,
             executable,
             smoke_report: report,
             smoke_finished: AtomicBool::new(false),

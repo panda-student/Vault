@@ -1,0 +1,298 @@
+//! Unified operation interface. Adapters hold a bound session, never raw services.
+//! Only bootstrap selects caller identity; neither Operation nor caller is decoded
+//! from a client-provided identity field. Policy runs before every business action.
+pub use crate::credential_write::WriteArgs;
+pub use crate::vault::{
+    EntryInput, EntryPatch, EntrySummary, EntryVersion, Kind, Organization, Settings, TrashEntry,
+};
+use crate::{
+    ai_output::{OutputGuard, SharedGuard},
+    error::{AppError, Result},
+};
+use serde::{Serialize, de::DeserializeOwned};
+use serde_json::{Value, json};
+use std::{
+    path::Path,
+    sync::{Arc, RwLock},
+};
+mod interface;
+pub use interface::{ClipboardPort, FieldRequest, FillRequest, Operation, Search};
+mod ai;
+mod filling;
+mod permissions;
+mod storage;
+#[cfg(test)]
+mod tests;
+mod windows;
+
+struct CoreService {
+    storage: storage::StorageService,
+    filling: filling::FillingService,
+    windows: windows::WindowsService,
+    permissions: permissions::PermissionService,
+}
+pub struct CoreSession {
+    service: CoreService,
+    caller: permissions::Caller,
+    guard: SharedGuard,
+}
+/// Bootstrap-only binding. Client payloads never reach this function.
+pub fn open(directory: &Path, mcp_mode: bool) -> Result<Arc<CoreSession>> {
+    Ok(Arc::new(CoreSession {
+        service: CoreService {
+            storage: storage::StorageService::open(directory)?,
+            filling: Default::default(),
+            windows: Default::default(),
+            permissions: permissions::PermissionService,
+        },
+        caller: if mcp_mode {
+            permissions::Caller::Mcp
+        } else {
+            permissions::Caller::Desktop
+        },
+        guard: Arc::new(RwLock::new(OutputGuard::default())),
+    }))
+}
+fn encoded(value: impl Serialize) -> Result<Value> {
+    serde_json::to_value(value).map_err(|_| AppError::storage())
+}
+impl CoreSession {
+    /// Bootstrap capability binding, not an operation available to client payloads.
+    pub fn bind_clipboard(&self, port: Arc<dyn ClipboardPort>) -> Result<()> {
+        self.service.permissions.authorize_operation(
+            self.caller,
+            &Operation::CopyText(String::new()),
+            &self.service.storage.settings()?,
+            &self.service.storage,
+        )?;
+        self.service.windows.bind_clipboard(port)
+    }
+    pub fn directory(&self) -> &Path {
+        self.service.storage.directory()
+    }
+    pub fn output_guard(&self) -> SharedGuard {
+        self.guard.clone()
+    }
+    pub fn refresh_output_guard(&self, guard: &mut OutputGuard) -> Result<()> {
+        for value in self.service.storage.protected_values()?.iter() {
+            guard.add(value);
+        }
+        Ok(())
+    }
+    pub fn protect_input(&self, value: &Value) -> Result<()> {
+        let mut guard = self.guard.write().map_err(|_| AppError::storage())?;
+        if let Some(secret) = value.get("secret").and_then(Value::as_str) {
+            guard.add(secret);
+        }
+        if let Some(items) = value.get("items").and_then(Value::as_array) {
+            for item in items {
+                if let Some(secret) = item.get("secret").and_then(Value::as_str) {
+                    guard.add(secret);
+                }
+            }
+        }
+        Ok(())
+    }
+    /// Discovery and execution consult the same persisted permission policy.
+    pub fn tool_allowed(&self, name: &str) -> Result<bool> {
+        let settings = self.service.storage.settings()?;
+        self.service
+            .permissions
+            .tool_allowed(self.caller, name, &settings, &self.service.storage)
+    }
+    pub fn call<T: DeserializeOwned>(&self, operation: Operation) -> Result<T> {
+        serde_json::from_value(self.execute(operation)?).map_err(|_| AppError::storage())
+    }
+    pub fn execute(&self, operation: Operation) -> Result<Value> {
+        let storage = &self.service.storage;
+        self.service.permissions.authorize_operation(
+            self.caller,
+            &operation,
+            &storage.settings()?,
+            storage,
+        )?;
+        let is_mcp = self.caller == permissions::Caller::Mcp;
+        if is_mcp {
+            let mut guard = self.guard.write().map_err(|_| AppError::storage())?;
+            self.refresh_output_guard(&mut guard)?;
+            match &operation {
+                Operation::Create(values) => {
+                    for value in values {
+                        guard.add(&value.secret);
+                    }
+                }
+                Operation::Update(values) => {
+                    for value in values {
+                        if let Some(secret) = &value.secret {
+                            guard.add(secret);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        let result = match operation {
+            Operation::McpConfig => {
+                let executable = std::env::current_exe().map_err(|_| {
+                    AppError::new(
+                        "CONFIG_UNAVAILABLE",
+                        "Unable to locate the current executable",
+                    )
+                })?;
+                Ok(
+                    json!({"mcpServers":{"local-password-manager":{"command":executable,"args":["--mcp","--data-dir",self.directory()]}}}),
+                )
+            }
+            Operation::Search(args) if is_mcp => {
+                ai::search(storage, &self.guard, args, &storage.settings()?)
+            }
+            Operation::Search(args) => {
+                let entries: Vec<_> = storage
+                    .list(&args.query, args.kind)?
+                    .into_iter()
+                    .filter(|e| {
+                        args.group.as_ref().is_none_or(|g| e.tags.contains(g))
+                            && args.tag.as_ref().is_none_or(|t| e.tags.contains(t))
+                    })
+                    .collect();
+                Ok(json!({"entries":entries,"hasMore":false}))
+            }
+            Operation::Read(ids) => ids
+                .into_iter()
+                .map(|id| {
+                    if is_mcp {
+                        ai::metadata(storage, &self.guard, &id)
+                    } else {
+                        encoded(storage.summary(&id)?)
+                    }
+                })
+                .collect::<Result<Vec<_>>>()
+                .map(Value::Array),
+            Operation::Create(values) => {
+                self.saved(storage.create_many(values, self.caller)?, is_mcp)
+            }
+            Operation::Update(values) => {
+                self.saved(storage.update_many(values, self.caller)?, is_mcp)
+            }
+            Operation::Delete(values) => encoded(
+                storage
+                    .delete_many(values, self.caller)?
+                    .into_iter()
+                    .map(|id| json!({"id":id,"status":"deleted"}))
+                    .collect::<Vec<_>>(),
+            ),
+            Operation::Pin {
+                id,
+                expected_revision,
+                pinned,
+            } => encoded(storage.pin(&id, expected_revision, pinned)?),
+            Operation::Organization => encoded(storage.organization()?),
+            Operation::Organize {
+                kind,
+                name,
+                previous,
+            } => {
+                storage.organize(&kind, &name, previous.as_deref())?;
+                Ok(Value::Null)
+            }
+            Operation::ListTrash => encoded(storage.list_trash()?),
+            Operation::Restore {
+                id,
+                expected_revision,
+            } => encoded(storage.restore(&id, expected_revision)?),
+            Operation::EmptyTrash { owner_window } => {
+                let entries = storage.list_trash()?;
+                if entries.is_empty()
+                    || !self
+                        .service
+                        .windows
+                        .confirm_purge(owner_window, entries.len())?
+                {
+                    Ok(json!(0))
+                } else {
+                    encoded(
+                        storage.empty_trash(
+                            entries
+                                .into_iter()
+                                .map(|e| EntryVersion {
+                                    id: e.summary.id,
+                                    expected_revision: e.summary.revision,
+                                })
+                                .collect(),
+                        )?,
+                    )
+                }
+            }
+            Operation::ReadField(args) => encoded(storage.read_field(
+                &args.id,
+                args.expected_revision,
+                &args.field,
+                args.service_id.as_deref(),
+            )?),
+            Operation::CopyField(args) => {
+                let text = storage.read_field(
+                    &args.id,
+                    args.expected_revision,
+                    &args.field,
+                    args.service_id.as_deref(),
+                )?;
+                self.service.windows.copy_text(text)?;
+                Ok(Value::Null)
+            }
+            Operation::CopyText(text) => {
+                self.service.windows.copy_text(text)?;
+                Ok(Value::Null)
+            }
+            Operation::Settings => encoded(storage.settings()?),
+            Operation::PermissionPreview(settings) => encoded(
+                storage
+                    .list("", None)?
+                    .iter()
+                    .map(|e| permissions::preview(&settings, e))
+                    .collect::<Vec<_>>(),
+            ),
+            Operation::SaveSettings(settings) => {
+                storage.save_settings(&settings)?;
+                encoded(settings)
+            }
+            Operation::StartupEnabled(executable) => encoded(
+                self.service
+                    .windows
+                    .startup_enabled(&executable, self.directory())?,
+            ),
+            Operation::SetStartup {
+                executable,
+                enabled,
+            } => encoded(self.service.windows.set_startup(
+                &executable,
+                self.directory(),
+                enabled,
+            )?),
+            Operation::CaptureTarget => Ok(self.service.filling.capture()),
+            Operation::Write(args) => self.service.filling.write(storage, args),
+            Operation::Fill(args) => self.service.filling.fill(storage, args),
+        };
+        if is_mcp {
+            let mut guard = self.guard.write().map_err(|_| AppError::storage())?;
+            self.refresh_output_guard(&mut guard)?;
+            result.map(|mut value| {
+                guard.scrub(&mut value);
+                value
+            })
+        } else {
+            result
+        }
+    }
+    fn saved(&self, entries: Vec<EntrySummary>, is_mcp: bool) -> Result<Value> {
+        if is_mcp {
+            encoded(
+                entries
+                    .into_iter()
+                    .map(|e| json!({"id":e.id,"revision":e.revision,"status":"saved"}))
+                    .collect::<Vec<_>>(),
+            )
+        } else {
+            encoded(entries)
+        }
+    }
+}

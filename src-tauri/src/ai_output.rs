@@ -1,8 +1,8 @@
 //! All MCP frames pass this boundary, including SDK-generated errors. Credential
 //! values and common encodings remain in zeroizing memory, never in diagnostics.
 use crate::{
+    core::CoreSession,
     error::{AppError, Result},
-    vault::Vault,
 };
 use base64::Engine;
 use serde_json::Value;
@@ -42,11 +42,8 @@ impl OutputGuard {
             }
         }
     }
-    pub fn refresh(&mut self, vault: &Vault) -> Result<()> {
-        for value in vault.protected_values()?.iter() {
-            self.add(value);
-        }
-        Ok(())
+    pub fn refresh(&mut self, core: &CoreSession) -> Result<()> {
+        core.refresh_output_guard(self)
     }
     fn contains(&self, text: &str) -> bool {
         self.values
@@ -82,21 +79,21 @@ pub fn scrub(guard: &SharedGuard, mut value: Value) -> Result<Value> {
 pub struct SafeWriter<W> {
     inner: W,
     guard: SharedGuard,
-    vault: Option<Arc<Vault>>,
+    core: Option<Arc<CoreSession>>,
     input: Vec<u8>,
     pending: Vec<u8>,
     offset: usize,
 }
 impl<W> SafeWriter<W> {
-    pub fn with_vault(mut self, vault: Arc<Vault>) -> Self {
-        self.vault = Some(vault);
+    pub fn with_core(mut self, core: Arc<CoreSession>) -> Self {
+        self.core = Some(core);
         self
     }
     pub fn new(inner: W, guard: SharedGuard) -> Self {
         Self {
             inner,
             guard,
-            vault: None,
+            core: None,
             input: vec![],
             pending: vec![],
             offset: 0,
@@ -138,9 +135,9 @@ impl<W: AsyncWrite + Unpin> AsyncWrite for SafeWriter<W> {
                     .guard
                     .write()
                     .map_err(|_| io::Error::other("Output guard unavailable"))?;
-                if let Some(vault) = &self.vault {
+                if let Some(core) = &self.core {
                     guard
-                        .refresh(vault)
+                        .refresh(core)
                         .map_err(|_| io::Error::other("Output protection refresh failed"))?;
                 }
                 guard.scrub(&mut value);

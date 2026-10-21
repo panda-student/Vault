@@ -1,7 +1,7 @@
 //! Desktop recovery operations. Intentionally absent from the MCP dispatcher.
 use super::*;
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TrashEntry {
     #[serde(flatten)]

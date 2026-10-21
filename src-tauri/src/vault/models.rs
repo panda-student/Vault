@@ -136,12 +136,68 @@ pub struct EntryDetail {
 pub struct Settings {
     pub mcp_enabled: bool,
     pub close_to_tray: bool,
+    #[serde(default)]
+    pub mcp_permissions: McpPermissions,
+    #[serde(default = "default_access")]
+    pub mcp_access: bool,
+    #[serde(default)]
+    pub mcp_tag_rules: std::collections::BTreeMap<String, PermissionRule>,
+    #[serde(default)]
+    pub mcp_entry_rules: std::collections::BTreeMap<String, PermissionRule>,
+}
+fn default_access() -> bool {
+    true
+}
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PermissionRule {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_metadata: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub create: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delete: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill_input: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub write_file: Option<bool>,
 }
 impl Default for Settings {
     fn default() -> Self {
         Self {
             mcp_enabled: true,
             close_to_tray: false,
+            mcp_permissions: McpPermissions::default(),
+            mcp_access: true,
+            mcp_tag_rules: Default::default(),
+            mcp_entry_rules: Default::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct McpPermissions {
+    pub read_metadata: bool,
+    pub create: bool,
+    pub update: bool,
+    pub delete: bool,
+    pub fill_input: bool,
+    pub write_file: bool,
+}
+impl Default for McpPermissions {
+    fn default() -> Self {
+        Self {
+            read_metadata: true,
+            create: true,
+            update: true,
+            delete: true,
+            fill_input: true,
+            write_file: true,
         }
     }
 }
