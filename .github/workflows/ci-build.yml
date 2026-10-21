@@ -1,0 +1,40 @@
+name: ci-build
+on:
+  push:
+    branches: [ci-build]
+    paths-ignore:
+      - 'src-tauri/target/**'
+permissions:
+  contents: write
+concurrency:
+  group: ci-build
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install frontend deps
+        run: npm install
+      - name: Frontend build (vue-tsc + vite)
+        run: npm run build
+      - name: Cargo unit tests
+        run: cargo test --release --manifest-path src-tauri/Cargo.toml
+      - name: Desktop build (no bundle)
+        run: npm run desktop:build
+      - name: MCP acceptance suites
+        env:
+          VAULT_EXE: src-tauri/target/release/local-password-manager.exe
+        run: |
+          npm run verify:integration
+          npm run verify:permissions
+      - name: Commit exe artifact back to branch
+        if: success()
+        run: |
+          git config user.name "ci-build-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -f src-tauri/target/release/local-password-manager.exe
+          git commit -m "ci: build artifact [skip ci]"
+          git push origin HEAD
