@@ -14,8 +14,9 @@ import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 
 const run = promisify(execFile), pause=ms=>new Promise(r=>setTimeout(r,ms));
 const root=resolve('artifacts/update-acceptance');await mkdir(root,{recursive:true});
-const from=resolve(process.env.UPDATE_FROM||join(root,'builds/v0.5.0.exe'));
-const to=resolve(process.env.UPDATE_TO||join(root,'builds/v0.5.1.exe'));
+const fromVersion=process.env.UPDATE_FROM_VERSION||'0.5.3',toVersion=process.env.UPDATE_TO_VERSION||'0.5.4',failedVersion='0.5.5';
+const from=resolve(process.env.UPDATE_FROM||join(root,`builds/v${fromVersion}.exe`));
+const to=resolve(process.env.UPDATE_TO||join(root,`builds/v${toVersion}.exe`));
 const appRoot=await mkdtemp(join(tmpdir(),'vault-update-原生 验收-'));
 const executable=join(appRoot,'Vault.exe'), data=join(appRoot,'isolated data');
 await copyFile(from,executable);
@@ -25,7 +26,7 @@ const check=(name,ok)=>{report.checks.push({name,passed:!!ok});assert.ok(ok,name
 const keyCommand="Add-Type -AssemblyName System.Security; $p=Join-Path $env:USERPROFILE '.codex/secrets/local-password-manager/update-signing-key.dpapi'; $b=[Security.Cryptography.ProtectedData]::Unprotect([IO.File]::ReadAllBytes($p),$null,[Security.Cryptography.DataProtectionScope]::CurrentUser); [Console]::Write([Text.Encoding]::UTF8.GetString($b)); [Array]::Clear($b,0,$b.Length)";
 const secret=(await run('powershell.exe',['-NoProfile','-Command',keyCommand],{windowsHide:true})).stdout.trim();
 const privateKey=createPrivateKey({key:Buffer.from(secret,'base64'),format:'der',type:'pkcs8'});
-const payload=Buffer.from(JSON.stringify({schema:1,version:'0.5.1',platform:'windows-x86_64',url:'https://github.com/panda-student/local-password-manager/releases/download/v0.5.1/Vault.exe',sha256:report.toSha256,size:binary.length,notes:'原生更新验收：保留标签、凭据、权限与自定义数据目录。'}));
+const payload=Buffer.from(JSON.stringify({schema:1,version:toVersion,platform:'windows-x86_64',url:`https://github.com/panda-student/local-password-manager/releases/download/v${toVersion}/Vault.exe`,sha256:report.toSha256,size:binary.length,notes:'原生更新验收：保留标签、凭据、权限、MCP 连接与自定义数据目录。'}));
 const valid={payload:payload.toString('base64'),signature:sign(null,payload,privateKey).toString('base64')};
 let activeEnvelope=valid,activeBinary=binary;
 let mode='bad-signature';
@@ -45,7 +46,7 @@ await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const probe=tcpServer();await new Promise(r=>probe.listen(0,'127.0.0.1',r));const port=probe.address().port;await new Promise(r=>probe.close(r));
 const env={...process.env,VAULT_UI_DEBUG_PORT:String(port),WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:`--remote-debugging-port=${port}`,VAULT_UPDATE_TEST_SOURCE:`http://127.0.0.1:${server.address().port}/latest.json`};
 const agent=process.env.AGENT_BROWSER_BIN||join(dirname(process.execPath),'node_modules/agent-browser/bin/agent-browser-win32-x64.exe');
-let session=`vault-update-before-${process.pid}`,desktop,client,ws,serial=0;
+let session=`vault-update-before-${process.pid}`,desktop,client,client2,ws,serial=0;
 const pending=new Map();
 async function connect(){
  const until=Date.now()+60000;
@@ -66,7 +67,9 @@ async function browser(...args){const result=await run(agent,['--session',sessio
 async function click(selector){await browser('click',selector);await pause(150);}
 async function screenshot(name){await browser('screenshot',join(root,name+'.png'));}
 async function waitText(selector,text){const end=Date.now()+15000;while(Date.now()<end){if((await evaluate(`document.querySelector(${JSON.stringify(selector)})?.textContent||''`)).includes(text))return;await pause(100);}throw Error('Missing UI text: '+text);}
-async function mcp(){const c=new Client({name:'isolated-update-test',version:'1'});await c.connect(new StdioClientTransport({command:executable,args:['--mcp','--data-dir',data],stderr:'pipe'}));return c;}
+async function mcp(){const c=new Client({name:'isolated-update-test',version:'1'});const transport=new StdioClientTransport({command:executable,args:['--mcp','--data-dir',data],stderr:'pipe'});await c.connect(transport);c.fixtureTransport=transport;return c;}
+async function resumed(c){const end=Date.now()+15000;while(Date.now()<end){try{if((await c.listTools()).tools.length===12)return true;}catch{}await pause(100);}return false;}
+async function coreProcesses(){const command="@(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $env:VAULT_TEST_EXE -and $_.CommandLine.Contains('--mcp-service') -and $_.CommandLine.Contains($env:VAULT_TEST_DIR) } | Select-Object -ExpandProperty ProcessId) | ConvertTo-Json -Compress";const r=await run('powershell.exe',['-NoProfile','-Command',command],{windowsHide:true,env:{...process.env,VAULT_TEST_EXE:executable,VAULT_TEST_DIR:data}});const ids=JSON.parse(r.stdout.trim()||'[]');return Array.isArray(ids)?ids:[ids];}
 async function killIsolated(){await run('powershell.exe',['-NoProfile','-Command',"Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $env:VAULT_TEST_EXE -or ($_.Path -like ($env:VAULT_TEST_ROOT+'\\.vault-update-*\\helper.exe')) } | Stop-Process -Force -ErrorAction SilentlyContinue"],{env:{...process.env,VAULT_TEST_EXE:executable,VAULT_TEST_ROOT:appRoot},windowsHide:true});}
 try{
  client=await mcp();const created=await client.callTool({name:'create_entries',arguments:{kind:'password',title:'升级保留样例',account:'test-user',tags:['验收标签'],secret:'FAKE_UPDATE_SECRET_ONLY_6721'}});const entry=JSON.parse(created.content.find(c=>c.type==='text').text);const id=entry.id||entry.results?.[0]?.id;assert.ok(id);await client.close();client=null;
@@ -75,23 +78,29 @@ try{
  await connect();await browser('snapshot','-i');await click('[data-nav="settings"]');
  await waitPhase('error');check('invalid-signature-rejected-before-download',(await status()).error.includes('签名'));await screenshot('01-invalid-signature');
  mode='offline';await click('#check-update');await waitPhase('error');check('network-failure-is-retryable',(await status()).error.includes('网络'));
- mode='valid';await click('#check-update');await waitPhase('available');check('signed-newer-version-discovered',(await status()).version==='0.5.1');
+ mode='valid';await click('#check-update');await waitPhase('available');check('signed-newer-version-discovered',(await status()).version===toVersion);
  await click('#download-update');await waitPhase('downloading');await click('#cancel-update');await waitPhase('error');check('download-cancellation-is-retryable',(await status()).error.includes('取消'));
  mode='corrupt';await click('#download-update');await waitPhase('error');check('corrupted-binary-rejected',(await status()).error.includes('校验'));check('failed-download-preserves-executable',createHash('sha256').update(await readFile(executable)).digest('hex')===report.fromSha256);
  mode='valid';await click('#download-update');await waitPhase('ready');check('download-verified-and-ready',(await status()).received===binary.length);await screenshot('02-ready');
- await click('[data-nav="entries"]');await browser('fill','#f-title','未保存草稿');await click('[data-nav="settings"]');await click('#install-update');await click('#cancel-install-update');check('confirmation-cancel-keeps-app',(await invoke('desktop_info')).version==='0.5.0');
+ await click('[data-nav="entries"]');await browser('fill','#f-title','未保存草稿');await click('[data-nav="settings"]');await click('#install-update');await click('#cancel-install-update');check('confirmation-cancel-keeps-app',(await invoke('desktop_info')).version===fromVersion);
  await click('#install-update');await click('#confirm-install-update');check('unsaved-draft-blocks-restart',(await evaluate("document.querySelector('#update-error')?.textContent||''")).includes('未保存'));await screenshot('03-draft-blocked');
  await click('[data-nav="entries"]');await click('#cancel-edit');await click('[data-nav="settings"]');
- client=await mcp();await click('#install-update');await click('#confirm-install-update');await waitText('#update-error','MCP');report.mcpBlockError=await evaluate("document.querySelector('#update-error')?.textContent||''");check('active-mcp-blocks-replacement',report.mcpBlockError.includes('MCP'));await screenshot('04-mcp-blocked');await client.close();client=null;
+ client=await mcp();client2=await mcp();
+ const bridgePids=[client.fixtureTransport.pid,client2.fixtureTransport.pid];
+ report.bridgePids=bridgePids;
+ const oldCores=await coreProcesses();check('two-clients-share-one-core-before-upgrade',oldCores.length===1);report.corePids=[oldCores[0]];
  // Configure a non-default permission and verify it survives the real restart.
  const oldInfo=await invoke('desktop_info');await invoke('save_settings',{settings:{...oldInfo.settings,mcpPermissions:{...oldInfo.settings.mcpPermissions,writeFile:false}}});
  await click('#install-update');await click('#confirm-install-update');ws.close();
  await pause(1600);session=`vault-update-after-${process.pid}`;await connect();
- const newInfo=await invoke('desktop_info');check('new-version-native-window-started',newInfo.version==='0.5.1');check('custom-data-directory-preserved',newInfo.dataDirectory===oldInfo.dataDirectory);check('permission-preserved',newInfo.settings.mcpPermissions.writeFile===false);
+ const newInfo=await invoke('desktop_info');check('new-version-native-window-started',newInfo.version===toVersion);check('custom-data-directory-preserved',newInfo.dataDirectory===oldInfo.dataDirectory);check('permission-preserved',newInfo.settings.mcpPermissions.writeFile===false);
  check('executable-replaced-at-original-path',createHash('sha256').update(await readFile(executable)).digest('hex')===report.toSha256);
  const entries=await invoke('list_entries');const saved=entries.find(e=>e.id===id);check('credential-and-tags-preserved',saved?.title==='升级保留样例'&&saved.tags.includes('验收标签'));
  const preserved=await invoke('read_secret',{id,expectedRevision:saved.revision});check('encrypted-secret-decrypts-after-upgrade',preserved==='FAKE_UPDATE_SECRET_ONLY_6721');
- client=await mcp();check('mcp-reconnects-at-same-path',(await client.listTools()).tools.length===12);await client.close();client=null;
+ check('two-existing-mcp-connections-resume-after-upgrade',await resumed(client)&&await resumed(client2));
+ const newCores=await coreProcesses();check('upgrade-restarts-exactly-one-shared-core',newCores.length===1&&newCores[0]!==oldCores[0]);report.corePids.push(newCores[0]);
+ check('client-facing-processes-preserved',client.fixtureTransport.pid===bridgePids[0]&&client2.fixtureTransport.pid===bridgePids[1]);
+ check('existing-mcp-reads-saved-entry',!(await client.callTool({name:'get_entries',arguments:{id}})).isError);
  await browser('snapshot','-i');await screenshot('05-upgraded');
  const width=await evaluate('window.innerWidth');await cdp('Emulation.setDeviceMetricsOverride',{width:900,height:580,deviceScaleFactor:1,mobile:false});await click('[data-nav="settings"]');
  check('update-actions-do-not-wrap-or-overflow-at-minimum-width',await evaluate("(()=>{const r=document.querySelector('#check-update').getBoundingClientRect(),p=document.querySelector('#update-panel').getBoundingClientRect();return r.right<=p.right&&r.left>=p.left&&document.documentElement.scrollWidth<=innerWidth})()"));await screenshot('06-minimum-width');await cdp('Emulation.clearDeviceMetricsOverride',{});
@@ -100,16 +109,19 @@ try{
  await writeFile(failingSource,'#![windows_subsystem="windows"]\nfn main(){std::process::exit(1);}\n');
  await run(join(process.env.USERPROFILE,'.cargo/bin/rustc.exe'),['--crate-name','failed_start','-C','opt-level=s','-C','strip=symbols',failingSource,'-o',failingBinary],{windowsHide:true});
  activeBinary=await readFile(failingBinary);
- const failedPayload=Buffer.from(JSON.stringify({schema:1,version:'0.5.2',platform:'windows-x86_64',url:'https://github.com/panda-student/local-password-manager/releases/download/v0.5.2/Vault.exe',sha256:createHash('sha256').update(activeBinary).digest('hex'),size:activeBinary.length,notes:'仅验收：启动失败应回退'}));
+ const failedPayload=Buffer.from(JSON.stringify({schema:1,version:failedVersion,platform:'windows-x86_64',url:`https://github.com/panda-student/local-password-manager/releases/download/v${failedVersion}/Vault.exe`,sha256:createHash('sha256').update(activeBinary).digest('hex'),size:activeBinary.length,notes:'仅验收：启动失败应回退'}));
  activeEnvelope={payload:failedPayload.toString('base64'),signature:sign(null,failedPayload,privateKey).toString('base64')};
  await click('#check-update');await waitPhase('available');await click('#download-update');await waitPhase('ready');
  await click('#install-update');await click('#confirm-install-update');ws.close();await pause(1600);session=`vault-update-rollback-${process.pid}`;await connect();
- check('failed-new-version-rolls-back-and-restarts',(await invoke('desktop_info')).version==='0.5.1');
+ check('failed-new-version-rolls-back-and-restarts',(await invoke('desktop_info')).version===toVersion);
+ check('both-mcp-connections-resume-after-rollback',await resumed(client)&&await resumed(client2));
+ const rolledBackCores=await coreProcesses();check('rollback-restarts-exactly-one-shared-core',rolledBackCores.length===1&&rolledBackCores[0]!==newCores[0]);report.corePids.push(rolledBackCores[0]);
+ check('rollback-preserves-client-facing-processes',client.fixtureTransport.pid===bridgePids[0]&&client2.fixtureTransport.pid===bridgePids[1]);
  check('rollback-restores-previous-executable-hash',createHash('sha256').update(await readFile(executable)).digest('hex')===report.toSha256);
  check('rollback-preserves-encrypted-credentials',(await invoke('read_secret',{id,expectedRevision:saved.revision}))==='FAKE_UPDATE_SECRET_ONLY_6721');await screenshot('07-rolled-back');
  report.passed=true;
 }catch(error){report.error=String(error);throw error;}
 finally{
- await client?.close().catch(()=>{});ws?.close();await killIsolated();server.closeAllConnections();await new Promise(r=>server.close(r));
+ await client?.close().catch(()=>{});await client2?.close().catch(()=>{});ws?.close();await killIsolated();server.closeAllConnections();await new Promise(r=>server.close(r));
  await writeFile(join(root,'native-update-report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({passed:report.passed,checks:report.checks.length,report:join(root,'native-update-report.json')}));
 }

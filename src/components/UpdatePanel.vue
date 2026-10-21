@@ -5,7 +5,7 @@ import type { VaultUI } from '../useVault';
 const props = defineProps<{v: UnwrapRef<VaultUI>}>();
 const dialog = ref<HTMLDialogElement|null>(null);
 const status = computed(() => props.v.updater.status);
-const labels: Record<string,string> = {idle:'尚未检查',checking:'正在检查更新…',available:'发现新版本',downloading:'正在下载更新…',ready:'已下载，等待重启',installing:'正在退出并更新…','up-to-date':'当前已是最新版本',error:'更新未完成'};
+const labels: Record<string,string> = {idle:'尚未检查',checking:'正在检查更新…',available:'发现新版本',downloading:'正在下载更新…',ready:'已下载，等待重启',installing:'正在等待操作完成并更新…','up-to-date':'当前已是最新版本',error:'更新未完成'};
 const progress = computed(() => status.value.total ? Math.min(100,Math.round(status.value.received/status.value.total*100)) : 0);
 async function install() { const done = await props.v.updater.action('install'); if (!done) dialog.value?.close(); }
 </script>
@@ -20,7 +20,7 @@ async function install() { const done = await props.v.updater.action('install');
     </div>
     <p v-if="v.updater.error||status.error" id="update-error" class="form-error" role="alert">{{v.updater.error||status.error}}</p>
     <p class="description update-hint">启动时自动检查。下载后验证签名，由你决定何时重启；更新保留现有密码库和 MCP 路径。</p>
-    <dialog ref="dialog" id="update-dialog"><h2>重启并更新到 v{{status.version}}？</h2><p class="dialog-description">程序将退出、替换并重新打开。请先保存修改，并在 AI 客户端断开正在使用此程序的 MCP 服务。</p><div class="modal-actions"><button id="cancel-install-update" class="secondary" autofocus :disabled="status.phase==='installing'" @click="dialog?.close()">稍后</button><button id="confirm-install-update" class="primary" :disabled="status.phase==='installing'" @click="install">重启并更新</button></div></dialog>
+    <dialog ref="dialog" id="update-dialog"><h2>重启并更新到 v{{status.version}}？</h2><p class="dialog-description">程序将退出、替换并重新打开。请先保存修改。已连接的 MCP 会等待当前操作完成，更新期间暂停内部服务，完成后自动恢复，无需退出 AI 客户端。</p><div class="modal-actions"><button id="cancel-install-update" class="secondary" autofocus :disabled="status.phase==='installing'" @click="dialog?.close()">稍后</button><button id="confirm-install-update" class="primary" :disabled="status.phase==='installing'" @click="install">重启并更新</button></div></dialog>
   </div>
 </template>
 <style scoped>

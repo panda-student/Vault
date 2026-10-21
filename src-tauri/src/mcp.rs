@@ -225,18 +225,13 @@ impl ServerHandler for VaultServer {
         Ok(result.into())
     }
 }
-pub fn run(core: Arc<CoreSession>) -> std::result::Result<(), Box<dyn std::error::Error>> {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?
-        .block_on(async {
-            let guard = core.output_guard();
-            let writer =
-                SafeWriter::new(tokio::io::stdout(), guard.clone()).with_core(core.clone());
-            let service = VaultServer { core }
-                .serve((tokio::io::stdin(), writer))
-                .await?;
-            service.waiting().await?;
-            Ok(())
-        })
+pub async fn serve_connection<R, W>(core: Arc<CoreSession>, input: R, output: W)
+    -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>
+where R: tokio::io::AsyncRead + Unpin + Send + 'static,
+      W: tokio::io::AsyncWrite + Unpin + Send + 'static {
+    let guard = core.output_guard();
+    let writer = SafeWriter::new(output, guard.clone()).with_core(core.clone());
+    let service = VaultServer { core }.serve((input, writer)).await?;
+    service.waiting().await?;
+    Ok(())
 }

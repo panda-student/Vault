@@ -7,6 +7,7 @@ mod error;
 mod fill;
 mod fixture;
 mod mcp;
+mod mcp_bridge;
 mod startup;
 mod vault;
 use core::{
@@ -503,6 +504,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         return core::apply_update(&PathBuf::from(&bootstrap_args[1])).map_err(Into::into);
     }
     let mut is_mcp = false;
+    let mut mcp_service = false;
     let mut directory = None;
     let mut report = None;
     let mut background = false;
@@ -521,6 +523,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 update_health = Some((path, token));
             }
             Some("--mcp") => is_mcp = true,
+            Some("--mcp-service") => { is_mcp = true; mcp_service = true; }
             Some("--data-dir") => {
                 directory = Some(PathBuf::from(
                     args.next().ok_or("--data-dir requires a path")?,
@@ -580,12 +583,15 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     if is_mcp && (report.is_some() || background) {
         return Err("MCP cannot be combined with desktop arguments".into());
     }
+    if is_mcp && !mcp_service {
+        return mcp_bridge::run(&executable, &directory);
+    }
+    if mcp_service {
+        return mcp_bridge::service::run(&executable, &directory);
+    }
     let runtime = core::UpdateRuntime::acquire(&executable)?;
     let core = core::open(&directory, is_mcp)?;
     core.bind_update_runtime(runtime)?;
-    if is_mcp {
-        return mcp::run(core);
-    }
     desktop(
         AppState {
             core,
@@ -598,7 +604,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     )
 }
 fn main() {
-    let is_mcp = std::env::args_os().any(|arg| arg == "--mcp");
+    let is_mcp = std::env::args_os().any(|arg| arg == "--mcp" || arg == "--mcp-service");
     if is_mcp {
         std::panic::set_hook(Box::new(|_| eprintln!("Local credential service failed")));
     }
@@ -608,7 +614,7 @@ fn main() {
         } else {
             eprintln!("Local Password Manager: {error}");
         }
-        if !std::env::args_os().any(|a| a == "--mcp") {
+        if !is_mcp {
             show_error(&error.to_string());
         }
         std::process::exit(1);

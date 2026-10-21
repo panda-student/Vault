@@ -1,11 +1,14 @@
 # 统一操作接口与五个核心服务
 
-桌面模式与 `--mcp` 模式都通过 `CoreSession.execute(Operation)` 进入核心，`call<T>` 只是执行后将结果转换为类型的便捷方法。每个进程拥有自己的会话与服务实例，共用代码和数据目录。
+桌面模式与 `--mcp` 模式都通过 `CoreSession.execute(Operation)` 进入核心，`call<T>` 只是执行后将结果转换为类型的便捷方法。桌面保留身份已绑定的本地会话；同一 Windows 身份、同一 EXE 与规范化密码库目录下的所有 MCP 连接，共享一个后台核心进程和会话。每个客户端只保留轻量 stdio 连接桥，不单独打开密码库。
 
 ```mermaid
 flowchart TD
   UI[Vue / WebView2] --> Desktop[桌面适配器 main.rs]
-  AI[AI 客户端] --> MCP[MCP 适配器 mcp.rs]
+  AI[多个 AI 客户端] --> Bridge[每连接一个轻量 stdio 适配器]
+  Bridge --> Pipe[当前用户专用 Windows 命名管道]
+  Pipe --> Shared[唯一 MCP 核心进程 / 按需启动]
+  Shared --> MCP[MCP 适配器 mcp.rs]
   Desktop --> API[统一接口 CoreSession / Operation]
   MCP --> API
   API --> Policy[权限服务 permissions.rs：每次先鉴权]
@@ -32,7 +35,8 @@ flowchart TD
 | --- | --- | --- |
 | 表现层 | `src/components/`、`src/useVault.ts` | 界面、草稿、标签与权限矩阵 |
 | 桌面适配器 | `main.rs` | 将 Tauri 命令转换为统一操作，组装窗口、托盘和剪贴板 OS 端口 |
-| MCP 适配器 | `mcp.rs`、`ai_output.rs` | 协议、参数与单条/批量格式转换，过滤协议帧 |
+| MCP 连接适配器 | `mcp_bridge.rs`、`mcp_bridge/` | 保留 stdio 连接、连接唯一共享核心、等待请求完成并暂停/恢复；不访问凭据 |
+| MCP 适配器 | `mcp.rs`、`ai_output.rs` | 共享核心中的协议会话、参数与单条/批量格式转换，过滤协议帧 |
 | 核心接口 | `core.rs`、`core/interface.rs` | 绑定调用身份，接收统一操作，先鉴权再调度，按身份生成返回结果 |
 | 权限服务 | `core/permissions.rs` | 默认权限、标签规则、单条例外、MCP 总开关及固定边界；工具发现和操作执行使用同一策略 |
 | 存储服务 | `core/storage.rs`、`core/ai.rs` | 凭据业务、版本校验、标签、垃圾桶和 AI 安全元数据投影 |
@@ -106,3 +110,9 @@ v3 格式把旧分组迁移为同名标签并去重，原账号、密码、地�
 ## 在线更新
 
 更新操作通过统一 Operation 接口，在核心被固定为 DesktopOnly。更新服务编排检查、下载与验签，Windows 能力服务执行进程启动。两入口启动时先获取共享运行锁，更新需取得独占锁。详细发布协议、数据保护、失败回退和验证边界见 [UPDATES.md](UPDATES.md)。
+
+## 更新期间的 MCP 生命周期
+
+更新协调按 EXE 路径覆盖所有相关 MCP 连接及不同密码库的共享核心。先拒绝新请求，等待已接收请求完成；连接桥关闭内部管道，共享核心释放存储和运行锁后确认暂停。更新辅助进程替换 EXE 并验证新版启动，或恢复旧版，然后解除暂停。原 stdio 连接进程保持不变，重新连接按唯一性规则启动的核心并在内部恢复握手；任何写请求都不自动重放。等待超时取消更新并自动恢复，其他桌面窗口和未迁移的旧版 MCP 仍需关闭或重连。
+
+共享核心使用启动锁与服务锁防止重复创建；命名管道限定当前用户和系统账户、拒绝远程连接，连接桥校验管道服务器所属用户。无客户端 5 秒后核心自动退出。所有进程由同一 EXE 启动，没有额外依赖或需安装的系统服务。

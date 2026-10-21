@@ -45,6 +45,7 @@
 !/scripts/update-release.mjs
 !/scripts/setup-updater.ps1
 !/scripts/verify-update.mjs
+!/scripts/verify-mcp-handoff.mjs
 
 /docs/*
 !/docs/licenses/

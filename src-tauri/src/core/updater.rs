@@ -138,12 +138,13 @@ fn verify_binary(path: &Path, manifest: &Manifest) -> Result<()> {
     Ok(())
 }
 
-/// All desktop/MCP processes hold a shared lease before opening the vault.
-/// An update needs an exclusive lease; it never kills another client process.
+/// Desktop and MCP workers hold a shared lease before opening the vault.
+/// Connection bridges stay alive while their workers drain and release leases.
 pub struct UpdateRuntime {
     pub(crate) executable: PathBuf,
     lease: Mutex<File>,
     pub(crate) cache: PathBuf,
+    pause: Mutex<Option<String>>,
 }
 impl UpdateRuntime {
     pub fn acquire(executable: &Path) -> Result<Arc<Self>> {
@@ -167,6 +168,7 @@ impl UpdateRuntime {
             executable: executable.to_owned(),
             lease: Mutex::new(file),
             cache,
+            pause: Mutex::new(None),
         }))
     }
     fn claim(&self) -> Result<()> {
@@ -176,7 +178,7 @@ impl UpdateRuntime {
             FileExt::try_lock_shared(&*file).map_err(|_| busy())?;
             return Err(failure(
                 "UPDATE_CLIENTS_ACTIVE",
-                "其他桌面或 MCP 进程正在使用此程序。请先退出其他窗口，并在 AI 客户端断开此 MCP 服务后重试。",
+                "仍有其他桌面窗口或旧版 MCP 占用程序。请退出其他窗口；旧版 MCP 首次切换需重连一次，新版 MCP 会自动暂停和恢复，无需退出 AI 客户端。",
             ));
         }
         Ok(())
@@ -189,15 +191,7 @@ impl UpdateRuntime {
     }
 }
 fn runtime_paths(executable: &Path) -> Result<(PathBuf, PathBuf)> {
-    let canonical = fs::canonicalize(executable).map_err(|_| invalid_update())?;
-    let name = format!(
-        "{:x}",
-        Sha256::digest(canonical.to_string_lossy().to_lowercase().as_bytes())
-    );
-    let base = PathBuf::from(std::env::var_os("LOCALAPPDATA").ok_or_else(AppError::storage)?)
-        .join("LocalPasswordManager")
-        .join("updates")
-        .join(name);
+    let base = crate::mcp_bridge::control::directory(executable)?;
     Ok((base.join("sessions.lock"), base.join("cache")))
 }
 
@@ -452,6 +446,7 @@ impl UpdateService {
         };
         let manifest = decode(&envelope, PUBLIC_KEY, env!("CARGO_PKG_VERSION"))?;
         verify_binary(&ready, &manifest)?;
+        let pause = crate::mcp_bridge::control::Pause::begin(&runtime.executable)?;
         runtime.claim()?;
         let result = (|| {
             let stage = runtime
@@ -474,6 +469,7 @@ impl UpdateService {
                 parent: std::process::id(),
                 envelope,
                 token: uuid::Uuid::new_v4().to_string(),
+                pause_token: Some(pause.token.clone()),
             };
             fs::write(
                 stage.join("plan.json"),
@@ -487,6 +483,9 @@ impl UpdateService {
         })();
         if result.is_err() {
             runtime.release_claim();
+        } else {
+            *runtime.pause.lock().map_err(|_| busy())? = Some(pause.token.clone());
+            pause.handoff();
         }
         result
     }
@@ -499,6 +498,11 @@ impl UpdateService {
     pub fn launch_failed(&self) {
         if let Ok(runtime) = self.runtime() {
             runtime.release_claim();
+            if let Ok(mut pending) = runtime.pause.lock() {
+                if let Some(token) = pending.take() {
+                    let _ = crate::mcp_bridge::control::Pause::adopt(&runtime.executable, &token);
+                }
+            }
         }
     }
 }
@@ -510,6 +514,8 @@ struct InstallPlan {
     parent: u32,
     envelope: Envelope,
     token: String,
+    #[serde(default)]
+    pause_token: Option<String>,
 }
 
 fn move_file(source: &Path, target: &Path) -> std::io::Result<()> {
@@ -562,6 +568,9 @@ pub fn apply_update(plan_path: &Path) -> Result<()> {
     {
         return Err(invalid_update());
     }
+    let _resume = plan.pause_token.as_deref()
+        .map(|token| crate::mcp_bridge::control::Pause::adopt(&plan.executable, token))
+        .transpose()?;
     let manifest = decode(&plan.envelope, PUBLIC_KEY, env!("CARGO_PKG_VERSION"))?;
     let payload = stage.join("payload.exe");
     verify_binary(&payload, &manifest)?;

@@ -17,10 +17,10 @@ const licenses=ref<HTMLDialogElement|null>(null);
       <div class="setting-row" style="padding-top:0"><div>允许 MCP 访问<small>关闭后，已连接客户端的后续请求也会被拒绝</small></div><button id="mcp-toggle" class="switch" :class="{off:!info?.settings.mcpEnabled}" role="switch" :aria-checked="info?.settings.mcpEnabled" aria-label="允许 MCP 访问" :disabled="settingsSaving||!info" @click="updateSettings('mcpEnabled')"></button></div>
       <nav class="mcp-tabs" role="tablist" aria-label="MCP 管理"><button id="connection-tab" role="tab" :aria-selected="tab==='connection'" :class="{active:tab==='connection'}" @click="tab='connection'">连接配置</button><button id="permissions-tab" role="tab" :aria-selected="tab==='permissions'" :class="{active:tab==='permissions'}" @click="tab='permissions'">权限管理</button></nav>
       <div v-show="tab==='connection'"><h2>把凭据库连接到 AI</h2>
-      <p class="description">AI 客户端按需启动独立进程，桌面窗口关闭后也可以使用。</p>
+      <p class="description">多个 AI 客户端共用后台服务，桌面窗口关闭后也可以使用。更新时服务自动暂停并恢复。</p>
       <div class="card">
         <h3>MCP 访问</h3>
-        <div class="setting-row"><div>连接方式<small>客户端启动本地程序，不监听网络端口</small></div><span class="pill">stdio · 按需启动</span></div>
+        <div class="setting-row"><div>连接方式<small>客户端启动本地程序，不监听网络端口</small></div><span class="pill">stdio · 共享服务</span></div>
         <div class="setting-row"><div>客户端配置<small>路径已按当前程序位置生成</small></div><button id="show-config" class="secondary" @click="configVisible=!configVisible">{{configVisible?'收起':'查看配置'}}</button></div>
         <div v-if="configVisible"><pre id="mcp-config">{{config}}</pre><button id="copy-config" class="primary" @click="copyConfig">复制配置</button></div>
       </div>
