@@ -19,7 +19,7 @@ flowchart TD
   Updater --> Windows
   Updater --> Releases[GitHub Releases：签名元数据和更新包]
   Actions[GitHub Actions：测试、构建、签名和发布] --> Releases
-  Storage --> Vault[Vault / 标签 / 垃圾桶 / 事务]
+  Storage --> Vault[vault / 标签 / 垃圾桶 / 事务]
   Vault --> Crypto[AES-256-GCM / Windows DPAPI]
   Vault --> DB[(SQLite)]
   Filling --> Vault
