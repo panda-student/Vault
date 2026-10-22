@@ -1,5 +1,11 @@
 param([string]$ArtifactDirectory='artifacts', [ValidateSet('Install','Reinstall','Remove')][string]$Phase='Install', [switch]$Silent)
 $ErrorActionPreference='Stop'
+function Get-Sha256([string]$Path) {
+    $stream=[IO.File]::OpenRead($Path)
+    $hasher=[Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($hasher.ComputeHash($stream))).Replace('-','').ToLowerInvariant() }
+    finally { $stream.Dispose();$hasher.Dispose() }
+}
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 $projectRoot=Split-Path -Parent $PSScriptRoot
@@ -91,7 +97,7 @@ try {
         }
         Check 'installer-success' ($process.ExitCode -eq 0)
         $installed=Join-Path $directory 'Vault.exe'
-        Check 'installed-binary-matches-portable' ((Get-FileHash $installed).Hash -eq (Get-FileHash (Join-Path $artifacts "vault-$version/Vault.exe")).Hash)
+        Check 'installed-binary-matches-portable' ((Get-Sha256 $installed) -eq (Get-Sha256 (Join-Path $artifacts "vault-$version/Vault.exe")))
         Check 'existing-data-preserved-on-install' ((Get-Content (Join-Path $directory 'data/keep.txt') -Raw) -eq 'SYNTHETIC_INSTALLER_DATA_ONLY')
         Check 'per-user-uninstall-registration' ((Get-ItemProperty $installKey).DisplayVersion -eq $version)
         $link=(New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
