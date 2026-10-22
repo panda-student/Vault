@@ -10,10 +10,10 @@ const artifacts=resolve(process.env.VAULT_ARTIFACTS||'artifacts'),root=await mkd
 const size=JSON.parse((await readFile(join(artifacts,'size.json'),'utf8')).replace(/^\uFEFF/,''));
 const hash=async p=>createHash('sha256').update(await readFile(p)).digest('hex');
 await run('powershell',['-NoProfile','-Command','Expand-Archive -LiteralPath $env:VAULT_ZIP -DestinationPath $env:VAULT_UNZIP'],{windowsHide:true,env:{...process.env,VAULT_ZIP:join(artifacts,`vault-${version}.zip`),VAULT_UNZIP:root}});
-const folder=join(root,`vault-${version}`),executable=join(folder,'Vault.exe');
+const folder=join(root,`vault-${version}`),executable=join(folder,'vault.exe');
 assert.equal(await hash(join(artifacts,`vault-${version}.zip`)),size.zipSha256);
-assert.equal(await hash(executable),size.files.find(f=>f.name==='Vault.exe').sha256);
-assert.deepEqual((await readdir(folder)).sort(),['LICENSE.txt','NOTICE.txt','README.txt','THIRD_PARTY_NOTICES.txt','Vault.exe','third-party-sources'].sort());
+assert.equal(await hash(executable),size.files.find(f=>f.name==='vault.exe').sha256);
+assert.deepEqual((await readdir(folder)).sort(),['LICENSE.txt','NOTICE.txt','README.txt','THIRD_PARTY_NOTICES.txt','vault.exe','third-party-sources'].sort());
 assert.ok((await readFile(join(folder,'LICENSE.txt'),'utf8')).includes('Apache License'));
 for(const script of ['verify-next.mjs','verify-write.mjs']){
  const {stdout}=await run(process.execPath,[join('scripts',script)],{windowsHide:true,timeout:240000,maxBuffer:1024*1024,env:{...process.env,VAULT_EXE:executable,VAULT_WRITE_EXE:executable}});

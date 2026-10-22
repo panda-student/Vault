@@ -1,10 +1,16 @@
 Unicode true
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
-Name "Vault"
-OutFile "${ARTIFACT_DIR}\Vault-${APP_VERSION}-Setup.exe"
-InstallDir "D:\Vault"
-InstallDirRegKey HKCU "Software\Vault" "InstallDir"
+!ifndef APP_REG_NAME
+  !define APP_REG_NAME "vault"
+!endif
+!ifndef APP_DEFAULT_DIR
+  !define APP_DEFAULT_DIR "D:\vault"
+!endif
+Name "${APP_REG_NAME}"
+OutFile "${ARTIFACT_DIR}\vault-${APP_VERSION}-setup.exe"
+InstallDir "${APP_DEFAULT_DIR}"
+InstallDirRegKey HKCU "Software\${APP_REG_NAME}" "InstallDir"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
 ShowInstDetails show
@@ -14,10 +20,10 @@ ShowUninstDetails show
 !define MUI_UNICON "..\src-tauri\icons\icon.ico"
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "${PACKAGE_DIR}\LICENSE.txt"
-!define MUI_PAGE_CUSTOMFUNCTION_LEAVE EnsureClosed
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
-!define MUI_FINISHPAGE_RUN "$INSTDIR\Vault.exe"
+!define MUI_FINISHPAGE_RUN "$INSTDIR\vault.exe"
+!define MUI_FINISHPAGE_RUN_FUNCTION LaunchInstalled
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
@@ -25,27 +31,28 @@ ShowUninstDetails show
 !insertmacro MUI_LANGUAGE "SimpChinese"
 !insertmacro MUI_LANGUAGE "English"
 VIProductVersion "${APP_VERSION}.0"
-VIAddVersionKey /LANG=2052 "ProductName" "Vault"
-VIAddVersionKey /LANG=2052 "FileDescription" "Vault 安装程序"
+VIAddVersionKey /LANG=2052 "ProductName" "${APP_REG_NAME}"
+VIAddVersionKey /LANG=2052 "FileDescription" "${APP_REG_NAME} 安装程序"
 VIAddVersionKey /LANG=2052 "FileVersion" "${APP_VERSION}"
 VIAddVersionKey /LANG=2052 "LegalCopyright" "panda-student · Apache-2.0"
 
 Function .onInit
   SetShellVarContext current
-  ${If} $INSTDIR == "D:\Vault"
+  ${If} $INSTDIR == "D:\vault"
+    StrCpy $INSTDIR "D:\vault"
     ${IfNot} ${FileExists} "D:\*.*"
-      StrCpy $INSTDIR "$LOCALAPPDATA\Programs\Vault"
+      StrCpy $INSTDIR "$LOCALAPPDATA\Programs\vault"
     ${EndIf}
   ${EndIf}
 FunctionEnd
 
 !macro DefineEnsureClosed Prefix
 Function ${Prefix}EnsureClosed
-  IfFileExists "$INSTDIR\Vault.exe" 0 done
+  IfFileExists "$INSTDIR\vault.exe" 0 done
   ClearErrors
-  FileOpen $0 "$INSTDIR\Vault.exe" a
+  FileOpen $0 "$INSTDIR\vault.exe" a
   ${If} ${Errors}
-    MessageBox MB_OK|MB_ICONSTOP "无法修改程序文件。请先退出 Vault 并断开 MCP，确认目录可写后重试。" /SD IDOK
+    MessageBox MB_OK|MB_ICONSTOP "无法修改程序文件。请先退出 vault 并断开 MCP，确认目录可写后重试。" /SD IDOK
     SetErrorLevel 2
     Abort
   ${EndIf}
@@ -53,18 +60,25 @@ Function ${Prefix}EnsureClosed
   done:
 FunctionEnd
 !macroend
-!insertmacro DefineEnsureClosed ""
 !insertmacro DefineEnsureClosed "un."
+
+Function LaunchInstalled
+  ; Replacement already restarted any previously running desktop windows.
+  IfFileExists "$PLUGINSDIR\install.restarted" done
+  Exec '"$INSTDIR\vault.exe"'
+  done:
+FunctionEnd
 
 Function un.onInit
   Call un.EnsureClosed
 FunctionEnd
 
-Section "Vault" Main
-  Call EnsureClosed
+Section "vault" Main
   SetShellVarContext current
+  InitPluginsDir
+  SetOutPath "$PLUGINSDIR"
+  File /oname=vault-helper.exe "${PACKAGE_DIR}\vault.exe"
   SetOutPath "$INSTDIR"
-  File "${PACKAGE_DIR}\Vault.exe"
   File "${PACKAGE_DIR}\README.txt"
   File "${PACKAGE_DIR}\LICENSE.txt"
   File "${PACKAGE_DIR}\NOTICE.txt"
@@ -72,24 +86,34 @@ Section "Vault" Main
   SetOutPath "$INSTDIR\third-party-sources"
   File "${PACKAGE_DIR}\third-party-sources\*"
   SetOutPath "$INSTDIR"
+  DetailPrint "等待操作完成，自动退出旧版并恢复 MCP..."
+  nsExec::ExecToStack '"$PLUGINSDIR\vault-helper.exe" --installer-replace "$INSTDIR\vault.exe" "$PLUGINSDIR\install.json"'
+  Pop $0
+  Pop $1
+  ${If} $0 != 0
+    DetailPrint "$1"
+    MessageBox MB_OK|MB_ICONSTOP "安装未完成，旧程序和 MCP 将自动恢复。$\r$\n$1" /SD IDOK
+    SetErrorLevel 2
+    Abort
+  ${EndIf}
   WriteUninstaller "$INSTDIR\Uninstall.exe"
-  WriteRegStr HKCU "Software\Vault" "InstallDir" "$INSTDIR"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Vault" "DisplayName" "Vault"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Vault" "DisplayVersion" "${APP_VERSION}"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Vault" "Publisher" "panda-student"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Vault" "DisplayIcon" "$INSTDIR\Vault.exe"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Vault" "InstallLocation" "$INSTDIR"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Vault" "UninstallString" '$\"$INSTDIR\Uninstall.exe$\"'
-  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Vault" "NoModify" 1
-  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Vault" "NoRepair" 1
-  CreateDirectory "$SMPROGRAMS\Vault"
-  CreateShortcut "$SMPROGRAMS\Vault\Vault.lnk" "$INSTDIR\Vault.exe"
+  WriteRegStr HKCU "Software\${APP_REG_NAME}" "InstallDir" "$INSTDIR"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_REG_NAME}" "DisplayName" "vault"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_REG_NAME}" "DisplayVersion" "${APP_VERSION}"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_REG_NAME}" "Publisher" "panda-student"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_REG_NAME}" "DisplayIcon" "$INSTDIR\vault.exe"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_REG_NAME}" "InstallLocation" "$INSTDIR"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_REG_NAME}" "UninstallString" '$\"$INSTDIR\Uninstall.exe$\"'
+  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_REG_NAME}" "NoModify" 1
+  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_REG_NAME}" "NoRepair" 1
+  CreateDirectory "$SMPROGRAMS\${APP_REG_NAME}"
+  CreateShortcut "$SMPROGRAMS\${APP_REG_NAME}\vault.lnk" "$INSTDIR\vault.exe"
 SectionEnd
 
 Section "Uninstall"
   SetShellVarContext current
   ; Delete only installed files. Never remove the user's data directory.
-  Delete "$INSTDIR\Vault.exe"
+  Delete "$INSTDIR\vault.exe"
   Delete "$INSTDIR\README.txt"
   Delete "$INSTDIR\LICENSE.txt"
   Delete "$INSTDIR\NOTICE.txt"
@@ -102,9 +126,9 @@ Section "Uninstall"
   Delete "$INSTDIR\third-party-sources\README.md"
   RMDir "$INSTDIR\third-party-sources"
   Delete "$INSTDIR\Uninstall.exe"
-  Delete "$SMPROGRAMS\Vault\Vault.lnk"
-  RMDir "$SMPROGRAMS\Vault"
-  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Vault"
-  DeleteRegKey HKCU "Software\Vault"
+  Delete "$SMPROGRAMS\${APP_REG_NAME}\vault.lnk"
+  RMDir "$SMPROGRAMS\${APP_REG_NAME}"
+  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_REG_NAME}"
+  DeleteRegKey HKCU "Software\${APP_REG_NAME}"
   RMDir "$INSTDIR"
 SectionEnd

@@ -10,8 +10,8 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $artifactRoot = if ($ArtifactDirectory) { [IO.Path]::GetFullPath($ArtifactDirectory) } else { Join-Path $projectRoot 'artifacts' }
 $version = (Get-Content -LiteralPath (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json).version
 $package = Join-Path $artifactRoot "vault-$version"
-if (!(Test-Path -LiteralPath (Join-Path $package 'Vault.exe'))) { throw 'Package the portable ZIP first.' }
-$output = Join-Path $artifactRoot "Vault-$version-Setup.exe"
+if (!(Test-Path -LiteralPath (Join-Path $package 'vault.exe'))) { throw 'Package the portable ZIP first.' }
+$output = Join-Path $artifactRoot "vault-$version-setup.exe"
 if (Test-Path -LiteralPath $output) { throw 'Installer already exists. Use a new artifact directory.' }
 $toolRoot = Join-Path $env:LOCALAPPDATA 'tauri/nsis-3.13'
 $compiler = Join-Path $toolRoot 'makensis.exe'
@@ -30,6 +30,6 @@ if (!(Test-Path -LiteralPath $compiler)) {
 }
 & $compiler /INPUTCHARSET UTF8 "/DAPP_VERSION=$version" "/DPACKAGE_DIR=$package" "/DARTIFACT_DIR=$artifactRoot" (Join-Path $PSScriptRoot 'installer.nsi')
 if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }
-$report = [ordered]@{ version=$version; bytes=(Get-Item -LiteralPath $output).Length; sha256=(Get-Sha256 $output); defaultDirectory='D:\Vault'; dataPreservedOnUninstall=$true }
+$report = [ordered]@{ version=$version; bytes=(Get-Item -LiteralPath $output).Length; sha256=(Get-Sha256 $output); defaultDirectory='D:\vault'; dataPreservedOnUninstall=$true }
 $report | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $artifactRoot 'installer-size.json') -Encoding UTF8
 $report | ConvertTo-Json

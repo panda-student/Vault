@@ -10,7 +10,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import assert from 'node:assert/strict';
 const run=promisify(execFile),pause=ms=>new Promise(r=>setTimeout(r,ms));
 const root=await mkdtemp(join(tmpdir(),'vault-mcp-shared-'));
-const exe=join(root,'Vault.exe'),data=join(root,'data');
+const exe=join(root,'vault.exe'),data=join(root,'data');
 await copyFile(resolve(process.env.VAULT_EXE||'src-tauri/target/release/local-password-manager.exe'),exe);
 const clients=[],report={passed:false,root,checks:[]};
 let lock;

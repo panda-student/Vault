@@ -175,7 +175,7 @@ mod tests {
     #[test]
     fn update_waits_for_ack_and_drop_resumes_only_its_own_pause() {
         let dir = tempfile::tempdir().unwrap();
-        let exe = dir.path().join("Vault.exe");
+        let exe = dir.path().join("vault.exe");
         fs::write(&exe, b"fixture").unwrap();
         let base = directory(&exe).unwrap();
         let registration = Registration::new(&base).unwrap();
@@ -203,7 +203,7 @@ mod tests {
     #[test]
     fn drain_timeout_cancels_update_and_removes_pause_request() {
         let dir = tempfile::tempdir().unwrap();
-        let exe = dir.path().join("Vault.exe");
+        let exe = dir.path().join("vault.exe");
         fs::write(&exe, b"fixture").unwrap();
         let base = directory(&exe).unwrap();
         let _registration = Registration::new(&base).unwrap();

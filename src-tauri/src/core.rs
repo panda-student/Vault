@@ -2,6 +2,7 @@
 //! Only bootstrap selects caller identity; neither Operation nor caller is decoded
 //! from a client-provided identity field. Policy runs before every business action.
 pub use crate::credential_write::WriteArgs;
+pub use crate::fill::CaptureRequest;
 pub use crate::vault::{
     EntryInput, EntryPatch, EntrySummary, EntryVersion, Kind, Organization, Settings, TrashEntry,
 };
@@ -25,6 +26,8 @@ mod storage;
 mod tests;
 mod updater;
 mod windows;
+mod installer;
+pub use installer::replace_package;
 pub use updater::{UpdateRuntime, apply_update};
 
 struct CoreService {
@@ -251,7 +254,7 @@ impl CoreSession {
                     )
                 })?;
                 Ok(
-                    json!({"mcpServers":{"Vault":{"command":executable,"args":["--mcp","--data-dir",self.directory()]}}}),
+                    json!({"mcpServers":{"vault":{"command":configuration_path(&executable),"args":["--mcp","--data-dir",configuration_path(self.directory())]}}}),
                 )
             }
             Operation::Search(args) if is_mcp => {
@@ -397,7 +400,7 @@ impl CoreSession {
                 self.directory(),
                 enabled,
             )?),
-            Operation::CaptureTarget => Ok(self.service.filling.capture()),
+            Operation::CaptureTarget(request) => self.service.filling.capture(request),
             Operation::Write(args) => self.service.filling.write(storage, args),
             Operation::Fill(args) => self.service.filling.fill(storage, args),
         };
@@ -424,4 +427,15 @@ impl CoreSession {
             encoded(entries)
         }
     }
+}
+
+// Normalize only product-owned path segments. Windows resolves legacy casing;
+// unrelated custom directory names retain exactly the user's chosen spelling.
+fn configuration_path(path: &Path) -> std::path::PathBuf {
+    path.components().map(|component| {
+        let value=component.as_os_str();
+        if value.to_string_lossy().eq_ignore_ascii_case("vault") { std::ffi::OsString::from("vault") }
+        else if value.to_string_lossy().eq_ignore_ascii_case("vault.exe") { std::ffi::OsString::from("vault.exe") }
+        else { value.to_owned() }
+    }).collect()
 }

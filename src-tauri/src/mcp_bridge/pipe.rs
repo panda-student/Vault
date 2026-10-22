@@ -31,7 +31,7 @@ impl Drop for OwnedHandle {
         let _ = unsafe { CloseHandle(self.0) };
     }
 }
-fn process_sid(process: HANDLE) -> io::Result<String> {
+pub(super) fn process_sid(process: HANDLE) -> io::Result<String> {
     unsafe {
         let mut token = HANDLE::default();
         OpenProcessToken(process, TOKEN_QUERY, &mut token).map_err(io::Error::other)?;

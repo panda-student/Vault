@@ -17,7 +17,7 @@ let installed=false,client;
 const checks=[];
 try{
  await phase('Install');installed=true;
- const fixture=await readReport(),executable=join(fixture.directory,'Vault.exe');
+ const fixture=await readReport(),executable=join(fixture.directory,'vault.exe');
  const acceptance=await run(process.execPath,['scripts/verify-next.mjs'],{windowsHide:true,timeout:180000,env:{...process.env,VAULT_EXE:executable},maxBuffer:1024*1024});
  console.log(acceptance.stdout.trim());checks.push({name:'installed-mcp-and-native-desktop',passed:true});
  async function connect(){

@@ -5,7 +5,7 @@ import {join,resolve} from 'node:path';
 import {tmpdir} from 'node:os';
 import {DatabaseSync} from 'node:sqlite';
 import {createHash} from 'node:crypto';
-const oldExe=resolve(process.env.VAULT_OLD_EXE||'artifacts/vault-0.2.0/Vault.exe');
+const oldExe=resolve(process.env.VAULT_OLD_EXE||'artifacts/vault-0.2.0/vault.exe');
 const newExe=resolve(process.env.VAULT_EXE||'src-tauri/target/release/local-password-manager.exe');
 const root=await mkdtemp(join(tmpdir(),'vault-migration-')),data=join(root,'data');
 const report={passed:false,checks:[]};let client;

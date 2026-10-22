@@ -17,7 +17,7 @@ New-Item -ItemType Directory -Path $packageDirectory -Force | Out-Null
 # Only known distribution files belong here. Runtime caches are never included.
 $existing = @(Get-ChildItem -LiteralPath $packageDirectory -Force)
 if ($existing.Count -gt 0) { throw 'Package directory already exists and is not empty. Move it aside before repackaging.' }
-Copy-Item -LiteralPath $releaseBinary -Destination (Join-Path $packageDirectory 'Vault.exe')
+Copy-Item -LiteralPath $releaseBinary -Destination (Join-Path $packageDirectory 'vault.exe')
 Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\PORTABLE-README.txt') -Destination (Join-Path $packageDirectory 'README.txt')
 Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination (Join-Path $packageDirectory 'LICENSE.txt')
 Copy-Item -LiteralPath (Join-Path $projectRoot 'NOTICE') -Destination (Join-Path $packageDirectory 'NOTICE.txt')
@@ -34,7 +34,7 @@ $report = [ordered]@{
     buildScope = $(if ($version -match 'p0') { 'P0 engineering baseline' } else { 'Desktop + SQLite + AES-256-GCM + user DPAPI + MCP + tray + optional startup' })
     bytesPerMB = 1000000
     bytesPerMiB = 1048576
-    executableBytes = (Get-Item -LiteralPath (Join-Path $packageDirectory 'Vault.exe')).Length
+    executableBytes = (Get-Item -LiteralPath (Join-Path $packageDirectory 'vault.exe')).Length
     extractedTotalBytes = ($files | Measure-Object -Property Length -Sum).Sum
     zipBytes = (Get-Item -LiteralPath $zipPath).Length
     zipSha256 = Get-Sha256 $zipPath

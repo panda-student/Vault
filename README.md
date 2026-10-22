@@ -1,8 +1,8 @@
-# 本地密码库 · Local Password Manager
+# vault
 
 Windows 便携凭据管理器：本地加密保存，人工直接编辑，AI 按引用填写。**AI 接口不返回密码、API Key 或 Token 原文。**
 
-[下载 Windows 安装版 / 便携版](https://github.com/panda-student/Vault/releases/latest) · [验收记录](docs/RELEASE.md)
+[下载 Windows 安装版 / 便携版](https://github.com/panda-student/vault/releases/latest) · [验收记录](docs/RELEASE.md)
 
 ![应用界面](docs/screenshots/current-ui.png)
 
@@ -20,20 +20,20 @@ Windows 便携凭据管理器：本地加密保存，人工直接编辑，AI 按
 
 ## 使用
 
-安装版下载 `Vault-<版本>-Setup.exe`，双击按向导安装，默认 `D:\Vault`，可以改目录；无 D 盘时使用当前用户的本地应用目录。开始菜单提供快捷方式，Windows 设置提供卸载入口；卸载保留 `data` 密码库。
+安装版下载 `vault-<版本>-setup.exe`，双击按向导安装，默认 `D:\vault`，可以改目录；无 D 盘时使用当前用户的本地应用目录。开始菜单提供快捷方式，Windows 设置提供卸载入口；卸载保留 `data` 密码库。
 
-便携版下载 `vault-<版本>.zip`。建议将便携包解压到 `D:\Vault`，然后启动 `D:\Vault\Vault.exe`，无需安装。要求 Windows 10/11 x64，系统已有 Microsoft Edge WebView2 Runtime；不捆绑运行时，也不依赖 Node.js、Python 或 Rust。
+便携版下载 `vault-<版本>.zip`。建议将便携包解压到 `D:\vault`，然后启动 `D:\vault\vault.exe`，无需安装。要求 Windows 10/11 x64，系统已有 Microsoft Edge WebView2 Runtime；不捆绑运行时，也不依赖 Node.js、Python 或 Rust。
 
 数据默认保存在 EXE 旁的 `data` 目录，首次运行为空库。设置页提供当前路径对应的 MCP 配置。移动程序后请更新 AI 客户端配置。
 
-**0.5.3 及以前版本需手动升级一次到 0.5.5**：先退出 Vault 窗口并断开 MCP，备份完整 `data`；将新版安装到原目录或解压后替换原程序，再重新连接 MCP。保持原 Windows 用户、电脑和数据目录即可继续使用已有凭据。0.5.4 起在线更新使用便携 ZIP，不再发布单独的 `Vault.exe` 下载附件。
+**0.5.6 及以前版本请使用 0.5.7 安装包覆盖升级一次**：本次统一程序名和 ZIP 内成员为 `vault.exe`，旧更新器不能识别小写成员。安装器会等待 MCP 操作完成，自动关闭旧版桌面、保留连接、更换程序并恢复原数据目录；启动失败时恢复旧程序。无需退出 Trae。0.5.2 及更早的直连 MCP 仍需首次重连一次；请先保存界面上未保存的修改。后续版本继续使用签名 ZIP 在线更新。
 
 ```json
 {
   "mcpServers": {
-    "Vault": {
-      "command": "D:/Vault/Vault.exe",
-      "args": ["--mcp", "--data-dir", "D:/Vault/data"]
+    "vault": {
+      "command": "D:/vault/vault.exe",
+      "args": ["--mcp", "--data-dir", "D:/vault/data"]
     }
   }
 }
@@ -49,7 +49,7 @@ Windows 便携凭据管理器：本地加密保存，人工直接编辑，AI 按
 | `create_entries` | 批量创建，兼容单条 |
 | `update_entries` | 按版本部分更新，批量原子提交 |
 | `delete_entries` | 按版本移入垃圾桶，批量原子提交 |
-| `capture_fill_target` | 捕获已聚焦的填写目标，30 秒内单次使用 |
+| `capture_fill_target` | 按窗口和输入框名称定位，或捕获当前原生焦点；30 秒内单次使用 |
 | `write_credential` | 在本地使用凭据引用，填写目标或写入文件 |
 | `fill_credential` | 保留给旧客户端的输入填写兼容入口 |
 
@@ -57,7 +57,13 @@ Windows 便携凭据管理器：本地加密保存，人工直接编辑，AI 按
 
 填写字段包括 `account`、`secret`、`url`、`service_url`、`host`、`port`、`database_name`、`database_type`。多个服务地址时须指定 `serviceId`。
 
-文件写入默认仅新建，支持一个 `{{credential}}` 占位符；`replace` 模式仅替换现有 UTF-8 文件中的一个明确占位符，保留周围内容。窗口填写先聚焦、捕获再写入，不自动导航、提交或按 Enter。`input_sent` 仅表示输入事件已发送。
+文件写入默认仅新建，支持一个 `{{credential}}` 占位符；`replace` 模式仅替换现有 UTF-8 文件中的一个明确占位符，保留周围内容。窗口填写先聚焦、捕获再写入，不自动导航、提交或按 Enter。`input_sent` 仅表示输入事件已发送。 浏览器建议先按窗口标题和输入框的可访问名称定位，不能只依赖网页 DOM 焦点。例如：
+
+```json
+{"windowTitle":"登录页标题","fieldName":"密码","expectedPassword":true}
+```
+
+将以上参数传给 `capture_fill_target`，再用返回的 `targetId` 调用 `write_credential`。可选 `processId` 用于缩小窗口范围。定位要求窗口和字段唯一、控件可编辑；密码类型不符、只读、重名或填写前焦点变化时拒绝操作。名称来自网页的 label / aria-label；没有可访问名称的自定义控件仍需手动取得原生焦点。程序不读取输入框内容，不自动清空或提交。Windows 拒绝后台窗口获得前台焦点时会返回 `focus_unavailable`；激活目标窗口后再重试。
 
 ## 安全边界与备份
 

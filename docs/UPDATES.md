@@ -12,7 +12,7 @@
 
 ## 签名发布协议
 
-稳定源：https://github.com/panda-student/Vault/releases/latest/download/latest.json
+稳定源：https://github.com/panda-student/vault/releases/latest/download/latest.json
 
 本项目使用签名信封格式（不是 Tauri 安装版更新格式）：
 
@@ -20,7 +20,7 @@
 {"payload":"base64(UTF-8 JSON)","signature":"base64(Ed25519 signature over exact payload bytes)"}
 ```
 
-签名载荷 schema=2 包含 version、platform=windows-x86_64、固定仓库/版本目录的 vault-<version>.zip URL、程序 sha256/size、压缩包 archive_sha256/archive_size 和更新说明。先验签，只接受较新的正式版本。程序和 ZIP 各限 64 MiB；下载先校验 ZIP 长度和哈希，Rust ZIP 解析只读固定的 vault-<version>/Vault.exe 成员，不解压任何其他路径，再校验程序长度、MZ 和哈希，安装前及辅助进程中再次校验。在线更新只替换程序；下载完整分发包后，用户也可手动更新 README、许可证和第三方声明。安装版与便携版使用同一套更新流程，不运行安装器。
+签名载荷 schema=2 包含 version、platform=windows-x86_64、固定仓库/版本目录的 vault-<version>.zip URL、程序 sha256/size、压缩包 archive_sha256/archive_size 和更新说明。先验签，只接受较新的正式版本。程序和 ZIP 各限 64 MiB；下载先校验 ZIP 长度和哈希，Rust ZIP 解析只读固定的 vault-<version>/vault.exe 成员，不解压任何其他路径，再校验程序长度、MZ 和哈希，安装前及辅助进程中再次校验。在线更新只替换程序；下载完整分发包后，用户也可手动更新 README、许可证和第三方声明。安装版与便携版使用同一套更新流程，不运行安装器。
 
 公钥位于 src-tauri/update-public-key.txt；PKCS#8 DER 私钥的 Base64 文本保存为 GitHub Secret VAULT_UPDATE_SIGNING_KEY。本机备份在用户 .codex/secrets/local-password-manager/update-signing-key.dpapi，由当前用户 DPAPI 加密。该备份不能直接跨电脑解密，需要另行安排受保护的离线恢复备份；不要随意更换已发行客户端信任的公钥。更新验签与 Windows Authenticode/SmartScreen 签名互相独立。
 
@@ -39,7 +39,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-updater.ps1 -U
 - PR 和 ci-build：验证并保留 7 天 Actions 附件，不发布正式版。
 - 不再将 EXE 提交回源码；使用标准 Windows runner。
 
-正式发布需要修改三个版本文件及锁文件，再推送对应版本标签。Release 应用下载附件为 Vault-<version>-Setup.exe 和 vault-<version>.zip；另含 latest.json、SHA256SUMS、size.json、installer-size.json 元数据，不上传独立 Vault.exe。Secret 缺失或不匹配时发布失败，不允许无签名降级。
+正式发布需要修改三个版本文件及锁文件，再推送对应版本标签。Release 应用下载附件为 vault-<version>-setup.exe 和 vault-<version>.zip；另含 latest.json、SHA256SUMS、size.json、installer-size.json 元数据，不上传独立 vault.exe。Secret 缺失或不匹配时发布失败，不允许无签名降级。
 
 ## 数据与失败处理
 
@@ -59,6 +59,14 @@ CI 迁移验收下载已发布的 v0.3.0 便携包并校验固定 SHA-256，覆�
 
 共享核心与多连接验收：`node scripts/verify-mcp-handoff.mjs`（可用 VAULT_EXE 指定程序）；更新/回退和连接保留验收：`node scripts/verify-update.mjs`（隔离签名测试源与两个 debug 构建）。
 
-仓库已更名为 `panda-student/Vault`。0.5.4 的 schema=2 清单指向新仓库的 ZIP；旧版会拒绝新清单，需要手动升级，不会把安装器误当主程序替换。保留 schema=1 读取能力仅用于已签名的历史 EXE 清单。
+仓库已更名为 `panda-student/vault`。0.5.4 的 schema=2 清单指向新仓库的 ZIP；旧版会拒绝新清单，需要手动升级，不会把安装器误当主程序替换。保留 schema=1 读取能力仅用于已签名的历史 EXE 清单。
 
-安装包采用 NSIS 3.13，使用现有工具链或校验固定 SHA-256 的便携编译器，不安装系统服务、不捆绑 WebView2。按当前 Windows 用户安装，默认 D:\Vault，无 D 盘时回退当前用户本地目录；目录页允许修改，重装沿用已有目录。只写程序、授权文件、开始菜单快捷方式和当前用户卸载注册表。卸载明确删除安装文件，保留 data 和其他用户文件。
+安装包采用 NSIS 3.13，使用现有工具链或校验固定 SHA-256 的便携编译器，不安装系统服务、不捆绑 WebView2。按当前 Windows 用户安装，默认 D:\vault，无 D 盘时回退当前用户本地目录；目录页允许修改，重装沿用已有目录。只写程序、授权文件、开始菜单快捷方式和当前用户卸载注册表。卸载明确删除安装文件，保留 data 和其他用户文件。
+
+## 0.5.7 小写名称与覆盖安装
+
+仓库、MCP 服务与配置键统一为 `vault`，默认目录 `D:\vault`，程序 `vault.exe`，分发包 `vault-<版本>.zip` / `vault-<版本>-setup.exe`。新版本仍读取历史大小写仓库 URL 和 ZIP 成员；旧更新器无法读取新的小写成员，0.5.6 及以前版本需要用本次安装包覆盖升级一次。
+
+NSIS 先展开分发资源，再调用内嵌程序的私有安装引导入口。核心安装协调器复用 MCP Pause 协议，等待原请求完成、保留 stdio 连接；Windows 适配器只识别目标路径下当前用户的桌面进程，通过 Restart Manager 正常关闭，保存其数据目录。取得程序会话独占锁后，旧 EXE 改名保留，新 EXE 原子替换；桌面完成健康握手才恢复 MCP。失败时恢复旧 EXE、重启原数据目录，并恢复连接。安装器不打开密码库，也没有新增 MCP 安装或终止进程工具。UI 中未保存的修改应在安装前保存。
+
+Windows 能力适配器与填写服务目前仍为不同模块；架构图里的合并是待实施的分层方案。

@@ -50,6 +50,10 @@
 !/scripts/setup-updater.ps1
 !/scripts/verify-update.mjs
 !/scripts/verify-mcp-handoff.mjs
+!/scripts/verify-browser-fill.mjs
+!/scripts/verify-browser-window.ps1
+!/scripts/verify-installer-handoff.mjs
+!/scripts/verify-installer-handoff.ps1
 
 /docs/*
 !/docs/licenses/

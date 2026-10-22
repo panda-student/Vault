@@ -87,7 +87,7 @@ pub enum Operation {
         executable: PathBuf,
         enabled: bool,
     },
-    CaptureTarget,
+    CaptureTarget(CaptureRequest),
     Write(WriteArgs),
     Fill(FillRequest),
 }

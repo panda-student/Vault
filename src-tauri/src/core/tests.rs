@@ -592,7 +592,7 @@ fn six_permissions_revoke_live_sessions_and_do_not_restrict_desktop() {
             id: entry.id.clone(),
             expected_revision: entry.revision,
         }]),
-        Operation::CaptureTarget,
+        Operation::CaptureTarget(CaptureRequest::default()),
         Operation::Fill(FillRequest {
             credential_id: entry.id.clone(),
             field: "secret".into(),
@@ -648,12 +648,21 @@ fn file_and_window_permissions_are_independent_and_checked_before_execution() {
         .unwrap();
     assert!(mcp.tool_allowed("write_credential").unwrap());
     assert_eq!(
-        mcp.execute(Operation::CaptureTarget).unwrap_err().code,
+        mcp.execute(Operation::CaptureTarget(CaptureRequest::default())).unwrap_err().code,
         "PERMISSION_DENIED"
     );
     assert!(
         mcp.execute(write(&entry.id, &dir.path().join("allowed.txt")))
             .is_ok()
+    );
+    assert_eq!(
+        mcp.execute(Operation::CaptureTarget(CaptureRequest {
+            window_title: Some("Must not be focused".into()),
+            field_name: Some("Password".into()),
+            expected_password: Some(true),
+            ..Default::default()
+        })).unwrap_err().code,
+        "PERMISSION_DENIED"
     );
     policy.mcp_permissions.write_file = false;
     policy.mcp_permissions.fill_input = true;
@@ -765,4 +774,10 @@ fn adapters_only_hold_bound_sessions_and_enter_operation_contract() {
             "MCP adapter unexpectedly uses {bypass}"
         );
     }
+}
+
+#[test]
+fn configuration_lowercases_only_product_path_segments() {
+    assert_eq!(configuration_path(Path::new(r"D:\Vault\Vault.exe")),std::path::PathBuf::from(r"D:\vault\vault.exe"));
+    assert_eq!(configuration_path(Path::new(r"D:\PrivateData\MyVault\data")),std::path::PathBuf::from(r"D:\PrivateData\MyVault\data"));
 }

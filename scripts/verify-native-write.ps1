@@ -98,6 +98,18 @@ if($Action -eq 'Capture') {
  try{$cropped.Save((Join-Path (Split-Path $StatePath -Parent) ($state.editor+'.png')),[System.Drawing.Imaging.ImageFormat]::Png)}finally{$cropped.Dispose();$graphics.Dispose();$bitmap.Dispose()}
  Write-Output '{"captured":true}'
 } elseif($Action -eq 'Focus') {
+ if($state.editor -eq 'notepad'){
+  # Activating the fixture with Alt can leave a menu focused. Explicitly
+  # select its writable document, never treat window activation as caret focus.
+  $root=[System.Windows.Automation.AutomationElement]::FromHandle($handle)
+  $document=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Document)
+  $edit=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Edit)
+  $condition=New-Object System.Windows.Automation.OrCondition($document,$edit)
+  $editors=@($root.FindAll([System.Windows.Automation.TreeScope]::Descendants,$condition)|Where-Object {!$_.Current.IsOffscreen -and $_.Current.IsEnabled})
+  if($editors.Count -ne 1){throw 'Isolated Notepad editor is not unique'}
+  $editors[0].SetFocus()
+  Start-Sleep -Milliseconds 150
+ }
  if($state.editor -eq 'ise'){
   [NativeWriteAudit]::Shortcut(0x49)
   Start-Sleep -Milliseconds 300

@@ -23,7 +23,7 @@ if (!(Test-Path -LiteralPath $protectedPath)) {
 if ($UploadSecret) {
     $plain = [Security.Cryptography.ProtectedData]::Unprotect([IO.File]::ReadAllBytes($protectedPath), $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)
     try {
-        [Text.Encoding]::UTF8.GetString($plain) | & gh secret set VAULT_UPDATE_SIGNING_KEY --repo panda-student/Vault
+        [Text.Encoding]::UTF8.GetString($plain) | & gh secret set VAULT_UPDATE_SIGNING_KEY --repo panda-student/vault
         if ($LASTEXITCODE -ne 0) { throw 'Failed to upload signing secret' }
     } finally { [Array]::Clear($plain, 0, $plain.Length) }
 }

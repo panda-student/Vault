@@ -51,7 +51,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force artifacts/migration-fixture | Out-Null
-          Invoke-WebRequest 'https://github.com/panda-student/Vault/releases/download/v0.3.0/vault-0.3.0.zip' -OutFile artifacts/migration-fixture/vault-0.3.0.zip
+          Invoke-WebRequest 'https://github.com/panda-student/vault/releases/download/v0.3.0/vault-0.3.0.zip' -OutFile artifacts/migration-fixture/vault-0.3.0.zip
           $hash = (Get-FileHash artifacts/migration-fixture/vault-0.3.0.zip -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($hash -ne 'fa5412693b58c9efb7b673699e82c4579d0110ca7786f84474b8de3973fad2ff') { throw 'Migration fixture checksum mismatch.' }
           Expand-Archive artifacts/migration-fixture/vault-0.3.0.zip artifacts/migration-fixture/unpacked
@@ -74,15 +74,43 @@ jobs:
         run: npm run package:installer
       - name: Verify installed application and uninstall preservation
         run: node scripts/verify-installer.mjs
+      - name: Verify overwrite installation with retained MCP clients
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          New-Item -ItemType Directory -Force artifacts/installer-fixture | Out-Null
+          Invoke-WebRequest 'https://github.com/panda-student/vault/releases/download/v0.5.5/vault-0.5.5.zip' -OutFile artifacts/installer-fixture/old.zip
+          if ((Get-FileHash artifacts/installer-fixture/old.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'ed8b3654cad6eacba5c2ef394bb6f16089efb51e88cdb336d6447595d693ebf9') { throw 'Installer fixture checksum mismatch' }
+          Expand-Archive artifacts/installer-fixture/old.zip artifacts/installer-fixture/unpacked
+          $env:VAULT_OLD_EXE = 'artifacts/installer-fixture/unpacked/vault-0.5.5/Vault.exe'
+          $env:VAULT_HELPER_EXE = "artifacts/vault-$version/vault.exe"
+          $env:VAULT_INSTALLER = "artifacts/vault-$version-setup.exe"
+          $env:VAULT_INSTALLER_REG_NAME = 'vault'
+          $env:VAULT_HANDOFF_REPORT = 'artifacts/installer-handoff-verification.json'
+          node scripts/verify-installer-handoff.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:VAULT_TEST_ROLLBACK = '1'
+          $env:VAULT_HANDOFF_REPORT = 'artifacts/installer-rollback-verification.json'
+          node scripts/verify-installer-handoff.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item Env:VAULT_TEST_ROLLBACK
+          $env:VAULT_OLD_EXE = $env:VAULT_HELPER_EXE
+          $env:VAULT_TEST_DRAIN = '1'
+          $env:VAULT_HANDOFF_REPORT = 'artifacts/installer-drain-verification.json'
+          node scripts/verify-installer-handoff.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Preserve short-lived build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: vault-windows-${{ github.sha }}
           path: |
             artifacts/vault-*.zip
-            artifacts/Vault-*-Setup.exe
+            artifacts/vault-*-setup.exe
             artifacts/installer-size.json
             artifacts/installer-verification.json
+            artifacts/installer-handoff-verification.json
+            artifacts/installer-rollback-verification.json
+            artifacts/installer-drain-verification.json
             artifacts/size.json
           retention-days: 7
       - name: Sign stable update metadata
@@ -92,7 +120,7 @@ jobs:
         shell: pwsh
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          node scripts/update-release.mjs manifest "artifacts/vault-$version/Vault.exe" artifacts/latest.json "${{ github.ref_name }}"
+          node scripts/update-release.mjs manifest "artifacts/vault-$version/vault.exe" artifacts/latest.json "${{ github.ref_name }}"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Publish GitHub Release attachments
         if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
@@ -103,7 +131,7 @@ jobs:
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $stable = '${{ github.ref }}'.StartsWith('refs/tags/v')
           $tag = if ($stable) { '${{ github.ref_name }}' } else { 'preview-' + '${{ github.sha }}'.Substring(0, 12) }
-          $files = @("artifacts/vault-$version.zip", "artifacts/Vault-$version-Setup.exe", 'artifacts/size.json', 'artifacts/installer-size.json')
+          $files = @("artifacts/vault-$version.zip", "artifacts/vault-$version-setup.exe", 'artifacts/size.json', 'artifacts/installer-size.json')
           if ($stable) { $files += 'artifacts/latest.json' }
           $lines = $files | ForEach-Object { (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + (Split-Path -Leaf $_) }
           $lines | Set-Content -Encoding utf8NoBOM artifacts/SHA256SUMS
@@ -116,15 +144,15 @@ jobs:
           } else {
             @"
           ## 下载选择
-          - Vault-$version-Setup.exe：安装向导，默认 D:\Vault，可修改目录；提供开始菜单和卸载入口，卸载保留密码库。
-          - vault-$version.zip：便携版，解压后启动 Vault.exe。
+          - vault-$version-setup.exe：安装向导，默认 D:\vault，可修改目录；提供开始菜单和卸载入口，卸载保留密码库。
+          - vault-$version.zip：便携版，解压后启动 vault.exe。
 
           ## 升级提示
-          0.5.3 及以前版本需要手动升级一次：退出 Vault、断开 MCP，备份完整 data，将新版安装或解压到原目录后重新连接 MCP。
-          0.5.4 起安装版和便携版都从签名 ZIP 在线更新，不再提供独立 Vault.exe 附件。
+          0.5.6 及以前版本使用本次安装包覆盖升级一次，统一为小写 vault.exe；安装器自动等待 MCP 操作完成、关闭旧桌面并在安装后恢复原数据目录与连接，无需退出 Trae。0.5.2 及以前的旧直连 MCP 首次迁移仍需重连。请先保存界面修改并备份 data。
+          0.5.4 起安装版和便携版都从签名 ZIP 在线更新，不再提供独立 vault.exe 附件。
           Windows 10/11 x64，需要系统已有 WebView2 Runtime。密码库仍绑定原 Windows 用户和电脑。
           "@ | Set-Content -Encoding utf8NoBOM artifacts/release-notes.md
-            gh release create $tag --repo '${{ github.repository }}' --target '${{ github.sha }}' --draft --title "Vault $version$(if (!$stable) { ' · Preview' })" --notes-file artifacts/release-notes.md
+            gh release create $tag --repo '${{ github.repository }}' --target '${{ github.sha }}' --draft --title "vault $version$(if (!$stable) { ' · Preview' })" --notes-file artifacts/release-notes.md
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
           gh release upload $tag @files --clobber --repo '${{ github.repository }}'

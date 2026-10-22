@@ -13,6 +13,9 @@ use tokio::{
     sync::mpsc,
 };
 const MAX_FRAME: usize = 16 * 1024 * 1024;
+pub(crate) fn same_user_process(process: windows::Win32::Foundation::HANDLE) -> std::io::Result<bool> {
+    Ok(pipe::process_sid(process)? == pipe::current_sid()?)
+}
 enum Event {
     Client(Vec<u8>),
     Worker(u64, Vec<u8>),

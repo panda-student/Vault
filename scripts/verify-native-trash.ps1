@@ -1,7 +1,7 @@
 ﻿param([int]$ProcessId,[string]$ReportPath)
 $ErrorActionPreference='Stop'
 $process=Get-Process -Id $ProcessId
-if ($process.ProcessName -notin @('local-password-manager','Vault')) { throw 'Unexpected fixture process' }
+if ($process.ProcessName -notin @('local-password-manager','vault')) { throw 'Unexpected fixture process' }
 Add-Type @'
 using System;
 using System.Text;

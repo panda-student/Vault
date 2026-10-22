@@ -22,9 +22,9 @@ async function call(name,args){
 try{
  transport=new StdioClientTransport({command:executable,args:['--mcp','--data-dir',data],stderr:'pipe'});
  await client.connect(transport);transport.stderr?.on('data',b=>outputs.push(String(b)));
- check('mcp-server-name',client.getServerVersion()?.name==='Vault');
+ check('mcp-server-name',client.getServerVersion()?.name==='vault');
  const config=await call('get_mcp_config',{});
- const launch=config.value.mcpServers?.Vault;
+ const launch=config.value.mcpServers?.vault;
  check('mcp-config-name-and-current-path',!config.failed&&launch&&await realpath(launch.command)===await realpath(executable)&&launch.args[0]==='--mcp'&&launch.args[1]==='--data-dir'&&await realpath(launch.args[2])===await realpath(data));
  const tools=(await client.listTools()).tools;
  check('twelve-tools-no-network-or-purge',tools.length===12&&!tools.some(t=>/execute_api|trash|purge/.test(t.name)));

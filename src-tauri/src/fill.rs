@@ -1,4 +1,41 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+mod locator;
+
+#[derive(Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CaptureRequest {
+    pub window_title: Option<String>,
+    pub process_id: Option<u32>,
+    pub field_name: Option<String>,
+    pub expected_password: Option<bool>,
+}
+impl CaptureRequest {
+    fn validate(&self) -> crate::error::Result<()> {
+        for (field, value, limit) in [
+            ("windowTitle", &self.window_title, 512),
+            ("fieldName", &self.field_name, 256),
+        ] {
+            if value.as_ref().is_some_and(|s| {
+                s.trim().is_empty() || s.chars().count() > limit || s.chars().any(char::is_control)
+            }) {
+                return Err(crate::error::AppError::invalid().with(
+                    field,
+                    "Use a nonempty literal label within the length limit.",
+                ));
+            }
+        }
+        if self.process_id == Some(0)
+            || ((self.window_title.is_some() || self.process_id.is_some())
+                && self.field_name.is_none())
+        {
+            return Err(crate::error::AppError::invalid().with(
+                "fieldName",
+                "A window selector requires a named input field; processId must be positive.",
+            ));
+        }
+        Ok(())
+    }
+}
 use std::{
     collections::HashMap,
     sync::Mutex,
@@ -39,6 +76,7 @@ struct Identity {
     focus: isize,
     process: i32,
     runtime: Vec<i32>,
+    is_password: Option<bool>,
 }
 struct Target {
     identity: Identity,
@@ -60,6 +98,8 @@ pub struct FillStatus {
     pub process_id: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_password: Option<bool>,
 }
 impl FillStatus {
     pub fn status(status: &'static str) -> Self {
@@ -69,6 +109,7 @@ impl FillStatus {
             expires_in_seconds: None,
             process_id: None,
             reason: None,
+            is_password: None,
         }
     }
 }
@@ -112,10 +153,10 @@ fn identity(use_accessibility: bool) -> std::result::Result<Identity, &'static s
         }
         // UIA supplements the native focus identity; it is not a prerequisite
         // for keyboard input. Document, custom editors and terminals are valid.
-        let (process, runtime) = if use_accessibility {
-            bounded_accessibility_identity().unwrap_or((window_process as i32, vec![]))
+        let (process, runtime, is_password) = if use_accessibility {
+            bounded_accessibility_identity().unwrap_or((window_process as i32, vec![], None))
         } else {
-            (window_process as i32, vec![])
+            (window_process as i32, vec![], None)
         };
         if process == -1 {
             return Err("read_only_or_non_input");
@@ -129,12 +170,13 @@ fn identity(use_accessibility: bool) -> std::result::Result<Identity, &'static s
             focus: gui.hwndFocus.0 as isize,
             process,
             runtime,
+            is_password,
         })
     }
 }
 // A broken accessibility provider must not stall an MCP call indefinitely.
 // Only this read-only probe runs in the worker: timed-out workers never type.
-fn bounded_accessibility_identity() -> Option<(i32, Vec<i32>)> {
+fn bounded_accessibility_identity() -> Option<(i32, Vec<i32>, Option<bool>)> {
     use std::sync::atomic::{AtomicBool, Ordering};
     static BUSY: AtomicBool = AtomicBool::new(false);
     if BUSY
@@ -164,7 +206,7 @@ fn bounded_accessibility_identity() -> Option<(i32, Vec<i32>)> {
 }
 // Never inspect names, text ranges or values. Unsupported accessibility
 // providers fall back to Win32 HWND/focus identity instead of blocking typing.
-fn accessibility_identity() -> Option<(i32, Vec<i32>)> {
+fn accessibility_identity() -> Option<(i32, Vec<i32>, Option<bool>)> {
     unsafe {
         let automation: IUIAutomation2 =
             CoCreateInstance(&CUIAutomation8, None, CLSCTX_INPROC_SERVER).ok()?;
@@ -178,13 +220,13 @@ fn accessibility_identity() -> Option<(i32, Vec<i32>)> {
             || element.CurrentIsOffscreen().ok()?.as_bool()
             || element.CurrentControlType().ok()? == UIA_ButtonControlTypeId
         {
-            return Some((-1, vec![]));
+            return Some((-1, vec![], None));
         }
         if let Ok(pattern) =
             element.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId)
             && pattern.CurrentIsReadOnly().ok()?.as_bool()
         {
-            return Some((-1, vec![]));
+            return Some((-1, vec![], None));
         }
         let array = element.GetRuntimeId().ok()?;
         if array.is_null() {
@@ -204,11 +246,19 @@ fn accessibility_identity() -> Option<(i32, Vec<i32>)> {
             Some(values)
         })();
         let _ = SafeArrayDestroy(array);
-        Some((element.CurrentProcessId().ok()?, runtime?))
+        Some((
+            element.CurrentProcessId().ok()?,
+            runtime?,
+            element.CurrentIsPassword().ok().map(|b| b.as_bool()),
+        ))
     }
 }
 impl Targets {
-    pub fn capture(&self) -> FillStatus {
+    pub fn capture(&self, request: CaptureRequest) -> crate::error::Result<FillStatus> {
+        request.validate()?;
+        if request.field_name.is_some() {
+            return Ok(self.remember(locator::capture(request.clone()), request.expected_password));
+        }
         // Chromium may enable its accessibility tree on the first UIA query.
         // Capture retries do not fetch any credential or dispatch input.
         let mut captured = identity(true);
@@ -219,6 +269,13 @@ impl Targets {
             std::thread::sleep(Duration::from_millis(100));
             captured = identity(true);
         }
+        Ok(self.remember(captured, request.expected_password))
+    }
+    fn remember(
+        &self,
+        captured: std::result::Result<Identity, &'static str>,
+        expected_password: Option<bool>,
+    ) -> FillStatus {
         let identity = match captured {
             Ok(identity) => identity,
             Err(reason) => {
@@ -227,6 +284,12 @@ impl Targets {
                 return status;
             }
         };
+        if expected_password.is_some() && identity.is_password != expected_password {
+            let mut status = FillStatus::status("unsupported_target");
+            status.reason = Some("field_type_mismatch");
+            status.is_password = identity.is_password;
+            return status;
+        }
         let Ok(mut items) = self.items.lock() else {
             return FillStatus::status("input_failed");
         };
@@ -235,6 +298,7 @@ impl Targets {
             return FillStatus::status("input_failed");
         }
         let process_id = identity.window_process;
+        let is_password = identity.is_password;
         let id = uuid::Uuid::new_v4().to_string();
         items.insert(
             id.clone(),
@@ -249,6 +313,7 @@ impl Targets {
             expires_in_seconds: Some(TTL.as_secs()),
             process_id: Some(process_id),
             reason: None,
+            is_password,
         }
     }
     pub fn fill<F>(&self, id: &str, value: F) -> crate::error::Result<FillStatus>
@@ -335,7 +400,45 @@ mod tests {
             focus: 3,
             process: 4,
             runtime: vec![1, 2],
+            is_password: None,
         }
+    }
+    #[test]
+    fn invalid_selectors_are_rejected_before_focus() {
+        for value in [
+            serde_json::json!({"windowTitle":"Edge"}),
+            serde_json::json!({"fieldName":"  "}),
+            serde_json::json!({"fieldName":"Password\n"}),
+            serde_json::json!({"fieldName":"Password","processId":0}),
+            serde_json::json!({"fieldName":"x".repeat(257)}),
+        ] {
+            let request: CaptureRequest = serde_json::from_value(value).unwrap();
+            assert!(Targets::default().capture(request).is_err());
+        }
+        assert!(
+            serde_json::from_value::<CaptureRequest>(serde_json::json!({"selector":"#password"}))
+                .is_err()
+        );
+    }
+    #[test]
+    fn password_type_mismatch_does_not_issue_a_target() {
+        let targets = Targets::default();
+        for actual in [None, Some(false)] {
+            let mut identity = fake();
+            identity.is_password = actual;
+            let result = targets.remember(Ok(identity), Some(true));
+            assert_eq!(result.reason, Some("field_type_mismatch"));
+            assert!(result.target_id.is_none());
+            assert!(targets.items.lock().unwrap().is_empty());
+        }
+        let mut identity = fake();
+        identity.is_password = Some(true);
+        assert!(
+            targets
+                .remember(Ok(identity), Some(true))
+                .target_id
+                .is_some()
+        );
     }
     #[test]
     fn invalid_and_expired_targets_never_load_secret() {

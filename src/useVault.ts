@@ -71,7 +71,7 @@ export function useVault() {
     [e.title,e.group,e.account,e.url,...e.tags,...Object.values(e.database??{}),...e.services.flatMap(s=>[s.url,protocolName(s.protocol)])].some(v=>v.toLowerCase().includes(query.value.trim().toLowerCase()))));
   const detail = computed(() => entries.value.find(e => e.id === selected.value));
   const title = computed(() => page.value === 'settings' ? '设置' : page.value==='mcp'?'MCP 管理':page.value === 'trash' ? '垃圾桶' : tagFilter.value?'# '+tagFilter.value:'全部凭据');
-  const config = computed(() => info.value ? JSON.stringify({ mcpServers: { 'Vault': { command: info.value.executable, args: ['--mcp', '--data-dir', info.value.dataDirectory] } } }, null, 2) : '');
+  const config = computed(() => info.value ? JSON.stringify({ mcpServers: { 'vault': { command: info.value.executable, args: ['--mcp', '--data-dir', info.value.dataDirectory] } } }, null, 2) : '');
   let fetching = false, timer: ReturnType<typeof setInterval> | undefined, toastTimer: ReturnType<typeof setTimeout> | undefined;
   const message = (value: unknown) => {
     if (!(value && typeof value === 'object')) return '操作失败，请检查本地文件权限后重试。';

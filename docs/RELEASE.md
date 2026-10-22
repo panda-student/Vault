@@ -1,3 +1,27 @@
+# 0.5.7 installer handoff and lowercase naming
+
+- Public product, repository, MCP server/config key, default directory and new downloads use `vault`: `panda-student/vault`, `D:\vault`, `vault.exe`, `vault-0.5.7.zip`, `vault-0.5.7-setup.exe`. Existing Windows paths and historical signed package casing remain readable. Older updaters need one overwrite installation for the lowercase ZIP member.
+- NSIS delegates executable replacement to the new payload's private core bootstrap. Existing MCP operations drain through the shared Pause protocol; stdio bridge processes and client connections stay alive. The Windows adapter identifies only same-user desktop processes at the target image path, closes them through Restart Manager without force, and retains custom data directories. Core leases serialize replacement; a failed health check restores the old executable and desktop before resuming MCP. No installer/kill tool is exposed to MCP.
+- Interactive installer testing uses the same NSIS script with an isolated registry name and temporary default directory, keeping the real installed vault untouched. The wizard keeps its Run checkbox enabled to verify that finishing does not launch a duplicate desktop. Production installer regression runs in CI on a clean Windows runner.
+- Repeated overwrite installs recognize previous `--update-health` arguments. Startup health failures are reported by the coordinator instead of leaving a blocking child dialog. Incoming MCP requests during pause are rejected explicitly, never replayed.
+- Browser regression explicitly activates only the isolated browser window, leaving the form inputs unfocused; vault itself locates and focuses each input, types locally and the test independently checks the resulting value. Windows may deny background activation; that returns focus_unavailable without typing.
+- Existing Edge target-location fix is included. This release changes no vault schema and moves no credential data.
+
+- Local validation: 53 Rust tests, 24 real Edge checks, 38 live permission checks, retained shared-core regression; real NSIS wizard and subsequent overwrite (10 checks), failed-start rollback (8 checks), in-flight write drain and exactly-once persistence (13 checks). Installer audit builds use an isolated registry/default directory; application payload hash matches the production package.
+
+---
+
+# 0.5.6 Edge password filling
+
+- Fix: browser DOM focus can differ from the Windows native keyboard target. `capture_fill_target` now accepts `windowTitle`, optional `processId`, `fieldName` and `expectedPassword`; the core filling service resolves a unique editable UIA control and acquires native focus before issuing the one-use reference.
+- Missing/ambiguous fields, readonly controls, password-type mismatches and focus changes reject filling. Existing empty-argument capture and native editor/file writing remain supported.
+- UIA workers never resolve or type credentials; input remains in the existing local, permission-checked path. No clipboard or browser extension is used, and no field values are read by Vault.
+- Regression (requires agent-browser; set `AGENT_BROWSER_EXE` if not installed next to Node): `node scripts/verify-browser-fill.mjs` launches an isolated real headed Edge page, calls Vault through MCP, and checks the actual synthetic password value, trusted input events, no submit, reference replay rejection and negative targets. Browser automation does not type the test secret.
+
+- Final local package verification: 22 real Edge checks; 20 native Notepad/PowerShell ISE/file checks; 38 live MCP permission checks; 50 Rust tests; frontend build and ZIP hash/content verification passed. Browser and native reports bind the same packaged executable SHA-256. Packages are local, not yet published to GitHub.
+
+---
+
 # 0.5.5 distribution and update verification
 
 - CI compatibility: SHA-256 uses .NET directly so PowerShell 5.1 does not depend on Get-FileHash module discovery.

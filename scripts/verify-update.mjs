@@ -18,7 +18,7 @@ const fromVersion=process.env.UPDATE_FROM_VERSION||'0.5.4',toVersion=process.env
 const from=resolve(process.env.UPDATE_FROM||join(root,`builds/v${fromVersion}.exe`));
 const to=resolve(process.env.UPDATE_TO||join(root,`builds/v${toVersion}.exe`));
 const appRoot=await mkdtemp(join(tmpdir(),'vault-update-原生 验收-'));
-const executable=join(appRoot,'Vault.exe'), data=join(appRoot,'isolated data');
+const executable=join(appRoot,'vault.exe'), data=join(appRoot,'isolated data');
 await copyFile(from,executable);
 const binary=await readFile(to), original=await readFile(from);
 const report={passed:false,root:appRoot,fromSha256:createHash('sha256').update(original).digest('hex'),toSha256:createHash('sha256').update(binary).digest('hex'),checks:[]};
@@ -28,12 +28,12 @@ const secret=(await run('powershell.exe',['-NoProfile','-Command',keyCommand],{w
 const privateKey=createPrivateKey({key:Buffer.from(secret,'base64'),format:'der',type:'pkcs8'});
 async function zipRelease(bytes,version){
  const folder=await mkdtemp(join(appRoot,'archive-'));
- const member=join(folder,`vault-${version}`);await mkdir(member);await writeFile(join(member,'Vault.exe'),bytes);
+ const member=join(folder,`vault-${version}`);await mkdir(member);await writeFile(join(member,'vault.exe'),bytes);
  const archive=join(folder,'portable.zip');
  await run('powershell.exe',['-NoProfile','-Command','Compress-Archive -LiteralPath $env:ZIP_MEMBER -DestinationPath $env:ZIP_OUTPUT'],{windowsHide:true,env:{...process.env,ZIP_MEMBER:member,ZIP_OUTPUT:archive}});
  return await readFile(archive);
 }
-function signedPayload(bytes,archive,version,notes){return Buffer.from(JSON.stringify({schema:2,version,platform:'windows-x86_64',url:`https://github.com/panda-student/Vault/releases/download/v${version}/vault-${version}.zip`,sha256:createHash('sha256').update(bytes).digest('hex'),size:bytes.length,archive_sha256:createHash('sha256').update(archive).digest('hex'),archive_size:archive.length,notes}));}
+function signedPayload(bytes,archive,version,notes){return Buffer.from(JSON.stringify({schema:2,version,platform:'windows-x86_64',url:`https://github.com/panda-student/vault/releases/download/v${version}/vault-${version}.zip`,sha256:createHash('sha256').update(bytes).digest('hex'),size:bytes.length,archive_sha256:createHash('sha256').update(archive).digest('hex'),archive_size:archive.length,notes}));}
 const archive=await zipRelease(binary,toVersion);
 const payload=signedPayload(binary,archive,toVersion,'原生 ZIP 更新验收：保留凭据、权限和 MCP 连接。');
 const valid={payload:payload.toString('base64'),signature:sign(null,payload,privateKey).toString('base64')};

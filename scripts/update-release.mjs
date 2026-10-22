@@ -36,7 +36,7 @@ if (command === 'validate') {
   const expected = createPublicKey(privateKey).export({ format: 'der', type: 'spki' }).subarray(-32).toString('base64');
   assert.equal(expected, raw, 'Signing key does not match the embedded public key');
   const archive = await readFile(resolve(dirname(binary), `../vault-${version}.zip`));
-  const payload = Buffer.from(JSON.stringify({ schema: 2, version, platform: 'windows-x86_64', url: `https://github.com/panda-student/Vault/releases/download/${tag}/vault-${version}.zip`, sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length, archive_sha256: createHash('sha256').update(archive).digest('hex'), archive_size: archive.length, notes: notesFile ? (await readFile(notesFile, 'utf8')).slice(0, 16000) : `Vault ${version}` }));
+  const payload = Buffer.from(JSON.stringify({ schema: 2, version, platform: 'windows-x86_64', url: `https://github.com/panda-student/vault/releases/download/${tag}/vault-${version}.zip`, sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length, archive_sha256: createHash('sha256').update(archive).digest('hex'), archive_size: archive.length, notes: notesFile ? (await readFile(notesFile, 'utf8')).slice(0, 16000) : `vault ${version}` }));
   const signature = sign(null, payload, privateKey);
   assert.ok(verify(null, payload, createPublicKey(privateKey), signature));
   await writeFile(output, JSON.stringify({ payload: payload.toString('base64'), signature: signature.toString('base64') }, null, 2) + '\n');

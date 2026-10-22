@@ -494,6 +494,10 @@ fn show_error(message: &str) {
 }
 fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let bootstrap_args: Vec<_> = std::env::args_os().skip(1).collect();
+    if bootstrap_args.first().is_some_and(|arg|arg=="--installer-replace") {
+        if bootstrap_args.len()!=3{return Err("Invalid installer arguments".into());}
+        return core::replace_package(&PathBuf::from(&bootstrap_args[1]),&PathBuf::from(&bootstrap_args[2])).map_err(Into::into);
+    }
     if bootstrap_args
         .first()
         .is_some_and(|arg| arg == "--apply-update")
@@ -558,7 +562,8 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         if is_mcp
             || !path.is_absolute()
             || path.file_name().and_then(|n| n.to_str()) != Some("healthy")
-            || stage.parent() != executable.parent()
+            || stage.parent().and_then(|p|std::fs::canonicalize(p).ok())
+                != executable.parent().and_then(|p|std::fs::canonicalize(p).ok())
             || !stage
                 .file_name()
                 .and_then(|n| n.to_str())
@@ -604,6 +609,8 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     )
 }
 fn main() {
+    let installer = std::env::args_os().nth(1).is_some_and(|arg|arg=="--installer-replace");
+    let health_probe = std::env::args_os().any(|arg|arg=="--update-health");
     let is_mcp = std::env::args_os().any(|arg| arg == "--mcp" || arg == "--mcp-service");
     if is_mcp {
         std::panic::set_hook(Box::new(|_| eprintln!("Local credential service failed")));
@@ -612,9 +619,9 @@ fn main() {
         if is_mcp {
             eprintln!("Local credential service could not complete startup");
         } else {
-            eprintln!("Local Password Manager: {error}");
+            eprintln!("vault: {error}");
         }
-        if !is_mcp {
+        if !is_mcp && !installer && !health_probe {
             show_error(&error.to_string());
         }
         std::process::exit(1);

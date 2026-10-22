@@ -1,6 +1,6 @@
 [package]
 name = "local-password-manager"
-version = "0.5.5"
+version = "0.5.7"
 description = "Portable Windows password and API credential manager"
 edition = "2024"
 rust-version = "1.90"
@@ -24,7 +24,7 @@ zeroize = "1"
 uuid = { version = "1", features = ["v4"] }
 winreg = "0.56"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
-windows = { version = "0.62", features = ["Win32_UI_Accessibility", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Threading", "Win32_Storage_FileSystem", "Win32_Security_Authorization", "Win32_System_Pipes"] }
+windows = { version = "0.62", features = ["Win32_UI_Accessibility", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Variant", "Win32_System_Threading", "Win32_Storage_FileSystem", "Win32_Security_Authorization", "Win32_System_Pipes", "Win32_System_RestartManager", "Win32_System_Wmi", "Win32_UI_Shell"] }
 base64 = "0.22"
 percent-encoding = "2"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "native-tls"] }

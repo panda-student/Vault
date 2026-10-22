@@ -353,7 +353,7 @@ pub(super) fn access(op: &Operation) -> Access {
                 Access::Input
             }
         }
-        Operation::Fill(_) | Operation::CaptureTarget => Access::Input,
+        Operation::Fill(_) | Operation::CaptureTarget(_) => Access::Input,
         _ => Access::DesktopOnly,
     }
 }

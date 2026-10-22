@@ -6,8 +6,8 @@ pub(super) struct FillingService {
     targets: Targets,
 }
 impl FillingService {
-    pub fn capture(&self) -> serde_json::Value {
-        serde_json::json!(self.targets.capture())
+    pub fn capture(&self, request: CaptureRequest) -> Result<serde_json::Value> {
+        Ok(serde_json::json!(self.targets.capture(request)?))
     }
     pub fn write(
         &self,

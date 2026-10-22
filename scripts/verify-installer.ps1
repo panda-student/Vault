@@ -11,8 +11,8 @@ Add-Type -AssemblyName UIAutomationTypes
 $projectRoot=Split-Path -Parent $PSScriptRoot
 $artifacts=[IO.Path]::GetFullPath($ArtifactDirectory)
 $reportPath=Join-Path $artifacts 'installer-verification.json'
-$installKey='HKCU:/Software/Microsoft/Windows/CurrentVersion/Uninstall/Vault'
-$shortcut=Join-Path ([Environment]::GetFolderPath('Programs')) 'Vault/Vault.lnk'
+$installKey='HKCU:/Software/Microsoft/Windows/CurrentVersion/Uninstall/vault'
+$shortcut=Join-Path ([Environment]::GetFolderPath('Programs')) 'Vault/vault.lnk'
 function Check([string]$Name,[bool]$Passed) {
     $script:report.checks+=@{name=$Name;passed=$Passed}
     if (!$Passed) { throw "Installer acceptance failed: $Name" }
@@ -56,14 +56,14 @@ public static class InstallerCapture {
 }
 try {
     if ($Phase -eq 'Install') {
-        if ((Test-Path 'HKCU:/Software/Vault') -or (Test-Path $installKey) -or (Test-Path $shortcut)) { throw 'Existing installed Vault registration detected; refusing to change it during acceptance.' }
+        if ((Test-Path 'HKCU:/Software/vault') -or (Test-Path $installKey) -or (Test-Path $shortcut)) { throw 'Existing installed Vault registration detected; refusing to change it during acceptance.' }
         $version=(Get-Content (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json).version
         $fixture=Join-Path ([IO.Path]::GetTempPath()) ('vault-installer-'+[guid]::NewGuid().ToString('N'))
-        $directory=Join-Path $fixture 'custom path/Vault'
+        $directory=Join-Path $fixture 'custom path/vault'
         New-Item -ItemType Directory -Force -Path (Join-Path $directory 'data') | Out-Null
         [IO.File]::WriteAllText((Join-Path $directory 'data/keep.txt'),'SYNTHETIC_INSTALLER_DATA_ONLY')
         $script:report=@{passed=$false;version=$version;directory=$directory;fixture=$fixture;checks=@();nativeWizard=(!$Silent)}
-        $installer=Join-Path $artifacts "Vault-$version-Setup.exe"
+        $installer=Join-Path $artifacts "vault-$version-setup.exe"
         if ($Silent) {
             $process=Start-Process -FilePath $installer -ArgumentList @('/S',('/D='+$directory)) -WindowStyle Hidden -PassThru -Wait
         } else {
@@ -96,8 +96,8 @@ try {
             if (!$process.WaitForExit(10000)) { throw 'Installer did not finish' }
         }
         Check 'installer-success' ($process.ExitCode -eq 0)
-        $installed=Join-Path $directory 'Vault.exe'
-        Check 'installed-binary-matches-portable' ((Get-Sha256 $installed) -eq (Get-Sha256 (Join-Path $artifacts "vault-$version/Vault.exe")))
+        $installed=Join-Path $directory 'vault.exe'
+        Check 'installed-binary-matches-portable' ((Get-Sha256 $installed) -eq (Get-Sha256 (Join-Path $artifacts "vault-$version/vault.exe")))
         Check 'existing-data-preserved-on-install' ((Get-Content (Join-Path $directory 'data/keep.txt') -Raw) -eq 'SYNTHETIC_INSTALLER_DATA_ONLY')
         Check 'per-user-uninstall-registration' ((Get-ItemProperty $installKey).DisplayVersion -eq $version)
         $link=(New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
@@ -108,7 +108,7 @@ try {
         if (![IO.Path]::GetFullPath($directory).StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath())) -or $directory -notlike '*vault-installer-*') { throw 'Unrecognized test fixture' }
         if ($Phase -eq 'Reinstall') {
             $version=$report.version
-            $installer=Join-Path $artifacts "Vault-$version-Setup.exe"
+            $installer=Join-Path $artifacts "vault-$version-setup.exe"
             $process=Start-Process -FilePath $installer -ArgumentList @('/S',('/D='+$directory)) -WindowStyle Hidden -Wait -PassThru
             Check 'reinstall-success' ($process.ExitCode -eq 0)
             Check 'data-preserved-on-reinstall' ((Get-Content (Join-Path $directory 'data/keep.txt') -Raw) -eq 'SYNTHETIC_INSTALLER_DATA_ONLY')
@@ -116,10 +116,10 @@ try {
         $uninstaller=Join-Path $directory 'Uninstall.exe'
         Start-Process -FilePath $uninstaller -ArgumentList '/S' -WindowStyle Hidden -Wait | Out-Null
         $until=(Get-Date).AddSeconds(15)
-        while ((Test-Path (Join-Path $directory 'Vault.exe')) -and (Get-Date) -lt $until) { Start-Sleep -Milliseconds 200 }
-        Check 'uninstall-removes-program' (!(Test-Path (Join-Path $directory 'Vault.exe')))
+        while ((Test-Path (Join-Path $directory 'vault.exe')) -and (Get-Date) -lt $until) { Start-Sleep -Milliseconds 200 }
+        Check 'uninstall-removes-program' (!(Test-Path (Join-Path $directory 'vault.exe')))
         Check 'uninstall-preserves-data' ((Get-Content (Join-Path $directory 'data/keep.txt') -Raw) -eq 'SYNTHETIC_INSTALLER_DATA_ONLY')
-        Check 'uninstall-removes-registration-and-shortcut' (!(Test-Path $installKey) -and !(Test-Path 'HKCU:/Software/Vault') -and !(Test-Path $shortcut))
+        Check 'uninstall-removes-registration-and-shortcut' (!(Test-Path $installKey) -and !(Test-Path 'HKCU:/Software/vault') -and !(Test-Path $shortcut))
         $report.passed=$true
         }
     }

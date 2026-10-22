@@ -1,6 +1,7 @@
 //! Windows capability service: startup integration and native human confirmation.
 use super::*;
 use std::path::Path;
+pub(super) mod installer;
 pub(super) struct UpdateLaunch {
     pub helper: std::path::PathBuf,
     pub plan: std::path::PathBuf,
@@ -43,6 +44,9 @@ pub(super) fn start_updated(
     }
     command
         .creation_flags(0x08000000)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .spawn()
         .map_err(|_| AppError::new("UPDATE_START", "无法启动新版程序。"))
 }
