@@ -1,11 +1,13 @@
-# 0.5.7 installer handoff and lowercase naming
+# 0.5.8 installer handoff and lowercase naming
 
-- Public product, repository, MCP server/config key, default directory and new downloads use `vault`: `panda-student/vault`, `D:\vault`, `vault.exe`, `vault-0.5.7.zip`, `vault-0.5.7-setup.exe`. Existing Windows paths and historical signed package casing remain readable. Older updaters need one overwrite installation for the lowercase ZIP member.
+- Public product, repository, MCP server/config key, default directory and new downloads use `vault`: `panda-student/vault`, `D:\vault`, `vault.exe`, `vault-0.5.8.zip`, `vault-0.5.8-setup.exe`. Existing Windows paths and historical signed package casing remain readable. Older updaters need one overwrite installation for the lowercase ZIP member.
 - NSIS delegates executable replacement to the new payload's private core bootstrap. Existing MCP operations drain through the shared Pause protocol; stdio bridge processes and client connections stay alive. The Windows adapter identifies only same-user desktop processes at the target image path, closes them through Restart Manager without force, and retains custom data directories. Core leases serialize replacement; a failed health check restores the old executable and desktop before resuming MCP. No installer/kill tool is exposed to MCP.
 - Interactive installer testing uses the same NSIS script with an isolated registry name and temporary default directory, keeping the real installed vault untouched. The wizard keeps its Run checkbox enabled to verify that finishing does not launch a duplicate desktop. Production installer regression runs in CI on a clean Windows runner.
 - Repeated overwrite installs recognize previous `--update-health` arguments. Startup health failures are reported by the coordinator instead of leaving a blocking child dialog. Incoming MCP requests during pause are rejected explicitly, never replayed.
 - Browser regression explicitly activates only the isolated browser window, leaving the form inputs unfocused; vault itself locates and focuses each input, types locally and the test independently checks the resulting value. Windows may deny background activation; that returns focus_unavailable without typing.
 - Existing Edge target-location fix is included. This release changes no vault schema and moves no credential data.
+
+- CI acceptance normalizes temporary directories before comparing native process image paths, handling Windows 8.3 aliases; failed acceptance reports are preserved for diagnosis.
 
 - Local validation: 53 Rust tests, 24 real Edge checks, 38 live permission checks, retained shared-core regression; real NSIS wizard and subsequent overwrite (10 checks), failed-start rollback (8 checks), in-flight write drain and exactly-once persistence (13 checks). Installer audit builds use an isolated registry/default directory; application payload hash matches the production package.
 

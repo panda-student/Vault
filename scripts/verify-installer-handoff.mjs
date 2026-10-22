@@ -2,7 +2,7 @@
 import {spawn,execFile} from 'node:child_process';
 import {existsSync} from 'node:fs';
 import {promisify} from 'node:util';
-import {mkdtemp,mkdir,copyFile,readFile,writeFile,readdir} from 'node:fs/promises';
+import {mkdtemp,mkdir,copyFile,readFile,writeFile,readdir,realpath} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {tmpdir} from 'node:os';
 import {createHash} from 'node:crypto';
@@ -10,7 +10,8 @@ import assert from 'node:assert/strict';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 const run=promisify(execFile),sleep=ms=>new Promise(r=>setTimeout(r,ms));
-const root=await mkdtemp(join(tmpdir(),'vault-installer-handoff-'));
+// CIM reports long paths even when Windows TEMP uses an 8.3 alias.
+const root=await realpath(await mkdtemp(join(tmpdir(),'vault-installer-handoff-')));
 const folder=join(root,'custom install','vault'),data=join(root,'custom data'),executable=join(folder,'vault.exe');
 await mkdir(folder,{recursive:true});
 await copyFile(resolve(process.env.VAULT_OLD_EXE||'artifacts/github-release-0.5.5/unpacked/vault-0.5.5/Vault.exe'),executable);
@@ -83,6 +84,7 @@ c=sqlite3.connect(sys.argv[1]);s=json.loads(c.execute("SELECT value FROM metadat
  }
  check(rollback?'old executable is restored after failed startup':'installed executable matches the packaged payload',await hash(executable)===(rollback?oldHash:expectedPayloadHash));
  const observed=JSON.parse((await run('powershell.exe',['-NoProfile','-Command',`$items=@(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $env:VAULT_AUDIT_IMAGE -and $_.CommandLine -notlike '*--mcp*' }); @{count=$items.Count;customData=(@($items | Where-Object { $_.CommandLine.Contains($env:VAULT_AUDIT_DATA) }).Count -eq 1)} | ConvertTo-Json -Compress`],{windowsHide:true,env:{...process.env,VAULT_AUDIT_IMAGE:executable,VAULT_AUDIT_DATA:data}})).stdout);
+ report.desktop=observed;console.log('Restarted desktop:',JSON.stringify(observed));
  check('exactly one desktop restarts with the original custom data path',observed.count===1&&observed.customData);
  for(const [index,c]of clients.entries()){
   let ready=false;for(let i=0;i<100;i++){try{await call(c,'get_entries',{id:entry.id});ready=true;break;}catch{await sleep(150);}}

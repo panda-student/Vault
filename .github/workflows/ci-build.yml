@@ -99,6 +99,14 @@ jobs:
           $env:VAULT_HANDOFF_REPORT = 'artifacts/installer-drain-verification.json'
           node scripts/verify-installer-handoff.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Preserve failed acceptance diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vault-acceptance-failure-${{ github.sha }}
+          path: artifacts/*verification.json
+          retention-days: 7
+          if-no-files-found: ignore
       - name: Preserve short-lived build artifacts
         uses: actions/upload-artifact@v4
         with:

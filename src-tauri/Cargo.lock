@@ -2084,7 +2084,7 @@ checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
 
 [[package]]
 name = "local-password-manager"
-version = "0.5.7"
+version = "0.5.8"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
