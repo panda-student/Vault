@@ -1,29 +1,34 @@
 //! Local filling service. It receives storage access internally, never from adapters.
 use super::*;
-use crate::fill::Targets;
+mod write;
+pub use write::WriteArgs;
 #[derive(Default)]
-pub(super) struct FillingService {
-    targets: Targets,
-}
+pub(super) struct FillingService;
 impl FillingService {
-    pub fn capture(&self, request: CaptureRequest) -> Result<serde_json::Value> {
-        Ok(serde_json::json!(self.targets.capture(request)?))
+    pub fn capture(
+        &self,
+        windows: &windows::WindowsService,
+        request: CaptureRequest,
+    ) -> Result<serde_json::Value> {
+        Ok(serde_json::json!(windows.capture_target(request)?))
     }
     pub fn write(
         &self,
         storage: &storage::StorageService,
+        windows: &windows::WindowsService,
         args: WriteArgs,
     ) -> Result<serde_json::Value> {
-        crate::credential_write::execute(&storage.vault, &self.targets, args)
+        write::execute(&storage.vault, windows, args)
     }
     pub fn fill(
         &self,
         storage: &storage::StorageService,
+        windows: &windows::WindowsService,
         args: FillRequest,
     ) -> Result<serde_json::Value> {
-        Ok(serde_json::json!(self.targets.fill(
+        Ok(serde_json::json!(windows.fill_target(
             &args.target_id,
-            || crate::credential_write::resolve_field(
+            || write::resolve_field(
                 &storage.vault,
                 &args.credential_id,
                 &args.field,

@@ -9,10 +9,10 @@ import {join,resolve} from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import assert from 'node:assert/strict';
 const run=promisify(execFile),pause=ms=>new Promise(r=>setTimeout(r,ms));
-const root=await mkdtemp(join(tmpdir(),'vault-mcp-shared-'));
+const root=await realpath(await mkdtemp(join(tmpdir(),'vault-mcp-shared-')));
 const exe=join(root,'vault.exe'),data=join(root,'data');
 await copyFile(resolve(process.env.VAULT_EXE||'src-tauri/target/release/local-password-manager.exe'),exe);
-const clients=[],report={passed:false,root,checks:[]};
+const clients=[],report={passed:false,root,executableSha256:createHash('sha256').update(await readFile(exe)).digest('hex'),checks:[]};
 let lock;
 const check=(name,ok)=>{report.checks.push({name,passed:!!ok});assert.ok(ok,name);console.log('PASS',name);};
 async function connect(){const c=new Client({name:'shared-core-regression',version:'1'});const t=new StdioClientTransport({command:exe,args:['--mcp','--data-dir',data],stderr:'pipe'});await c.connect(t);c.transportFixture=t;clients.push(c);return c;}

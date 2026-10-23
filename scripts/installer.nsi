@@ -87,12 +87,16 @@ Section "vault" Main
   File "${PACKAGE_DIR}\third-party-sources\*"
   SetOutPath "$INSTDIR"
   DetailPrint "等待操作完成，自动退出旧版并恢复 MCP..."
-  nsExec::ExecToStack '"$PLUGINSDIR\vault-helper.exe" --installer-replace "$INSTDIR\vault.exe" "$PLUGINSDIR\install.json"'
-  Pop $0
-  Pop $1
+  ; The replacement coordinator is a GUI-subsystem program, not a console filter.
+  ; Status is written to JSON; only the actual exit code belongs in this adapter.
+  ClearErrors
+  ExecWait '"$PLUGINSDIR\vault-helper.exe" --installer-replace "$INSTDIR\vault.exe" "$PLUGINSDIR\install.json"' $0
+  ${If} ${Errors}
+    StrCpy $0 1
+  ${EndIf}
   ${If} $0 != 0
-    DetailPrint "$1"
-    MessageBox MB_OK|MB_ICONSTOP "安装未完成，旧程序和 MCP 将自动恢复。$\r$\n$1" /SD IDOK
+    DetailPrint "程序替换未完成，协调器退出码：$0"
+    MessageBox MB_OK|MB_ICONSTOP "安装未完成，旧程序和 MCP 将自动恢复。" /SD IDOK
     SetErrorLevel 2
     Abort
   ${EndIf}

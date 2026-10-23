@@ -14,7 +14,7 @@ import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 
 const run = promisify(execFile), pause=ms=>new Promise(r=>setTimeout(r,ms));
 const root=resolve('artifacts/update-acceptance');await mkdir(root,{recursive:true});
-const fromVersion=process.env.UPDATE_FROM_VERSION||'0.5.4',toVersion=process.env.UPDATE_TO_VERSION||'0.5.5',failedVersion='0.5.6';
+const fromVersion=process.env.UPDATE_FROM_VERSION||'0.5.4',toVersion=process.env.UPDATE_TO_VERSION||'0.5.5',failedVersion=process.env.UPDATE_FAILED_VERSION||'0.5.6';
 const from=resolve(process.env.UPDATE_FROM||join(root,`builds/v${fromVersion}.exe`));
 const to=resolve(process.env.UPDATE_TO||join(root,`builds/v${toVersion}.exe`));
 const appRoot=await mkdtemp(join(tmpdir(),'vault-update-原生 验收-'));
@@ -76,9 +76,9 @@ async function browser(...args){const result=await run(agent,['--session',sessio
 async function click(selector){await browser('click',selector);await pause(150);}
 async function screenshot(name){await browser('screenshot',join(root,name+'.png'));}
 async function waitText(selector,text){const end=Date.now()+15000;while(Date.now()<end){if((await evaluate(`document.querySelector(${JSON.stringify(selector)})?.textContent||''`)).includes(text))return;await pause(100);}throw Error('Missing UI text: '+text);}
-async function mcp(){const c=new Client({name:'isolated-update-test',version:'1'});const transport=new StdioClientTransport({command:executable,args:['--mcp','--data-dir',data],stderr:'pipe'});await c.connect(transport);c.fixtureTransport=transport;return c;}
+async function mcp(){const c=new Client({name:'isolated-update-test',version:'1'});const transport=new StdioClientTransport({command:executable,args:['--mcp','--data-dir',data],env,stderr:'pipe'});await c.connect(transport);c.fixtureTransport=transport;return c;}
 async function resumed(c){const end=Date.now()+15000;while(Date.now()<end){try{if((await c.listTools()).tools.length===12)return true;}catch{}await pause(100);}return false;}
-async function coreProcesses(){const command="@(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $env:VAULT_TEST_EXE -and $_.CommandLine.Contains('--mcp-service') -and $_.CommandLine.Contains($env:VAULT_TEST_DIR) } | Select-Object -ExpandProperty ProcessId) | ConvertTo-Json -Compress";const r=await run('powershell.exe',['-NoProfile','-Command',command],{windowsHide:true,env:{...process.env,VAULT_TEST_EXE:executable,VAULT_TEST_DIR:data}});const ids=JSON.parse(r.stdout.trim()||'[]');return Array.isArray(ids)?ids:[ids];}
+async function coreProcesses(){const command="@(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $env:VAULT_TEST_EXE -and $_.CommandLine -notmatch '(?:^|\\s)--mcp(?:\\s|$)' -and $_.CommandLine.Contains($env:VAULT_TEST_DIR) } | Select-Object -ExpandProperty ProcessId) | ConvertTo-Json -Compress";const r=await run('powershell.exe',['-NoProfile','-Command',command],{windowsHide:true,env:{...process.env,VAULT_TEST_EXE:executable,VAULT_TEST_DIR:data}});const ids=JSON.parse(r.stdout.trim()||'[]');return Array.isArray(ids)?ids:[ids];}
 async function killIsolated(){await run('powershell.exe',['-NoProfile','-Command',"Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $env:VAULT_TEST_EXE -or ($_.Path -like ($env:VAULT_TEST_ROOT+'\\.vault-update-*\\helper.exe')) } | Stop-Process -Force -ErrorAction SilentlyContinue"],{env:{...process.env,VAULT_TEST_EXE:executable,VAULT_TEST_ROOT:appRoot},windowsHide:true});}
 try{
  client=await mcp();const created=await client.callTool({name:'create_entries',arguments:{kind:'password',title:'升级保留样例',account:'test-user',tags:['验收标签'],secret:'FAKE_UPDATE_SECRET_ONLY_6721'}});const entry=JSON.parse(created.content.find(c=>c.type==='text').text);const id=entry.id||entry.results?.[0]?.id;assert.ok(id);await client.close();client=null;

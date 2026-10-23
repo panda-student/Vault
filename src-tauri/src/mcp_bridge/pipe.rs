@@ -17,9 +17,10 @@ use windows::{
             TOKEN_USER, TokenUser,
         },
         System::{
-            Pipes::GetNamedPipeServerProcessId,
+            Pipes::{GetNamedPipeClientProcessId, GetNamedPipeServerProcessId},
             Threading::{
-                GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+                GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_NAME_WIN32,
+                PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
             },
         },
     },
@@ -124,6 +125,42 @@ pub fn verify_server(pipe: &NamedPipeClient) -> io::Result<u32> {
         }
     }
     Ok(pid)
+}
+
+/// The desktop activation channel accepts only a same-user copy of this exact
+/// executable. It never accepts operations, identities, credentials or paths.
+pub fn verify_desktop_client(pipe: &NamedPipeServer, executable: &Path) -> io::Result<u32> {
+    unsafe {
+        let mut pid = 0;
+        GetNamedPipeClientProcessId(HANDLE(pipe.as_raw_handle()), &mut pid)
+            .map_err(io::Error::other)?;
+        let process = OwnedHandle(
+            OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).map_err(io::Error::other)?,
+        );
+        if process_sid(process.0)? != current_sid()? {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "Unexpected desktop identity",
+            ));
+        }
+        let mut image = vec![0u16; 32768];
+        let mut length = image.len() as u32;
+        QueryFullProcessImageNameW(
+            process.0,
+            PROCESS_NAME_WIN32,
+            PWSTR(image.as_mut_ptr()),
+            &mut length,
+        )
+        .map_err(io::Error::other)?;
+        let image = PathBuf::from(String::from_utf16_lossy(&image[..length as usize]));
+        if std::fs::canonicalize(image)? != std::fs::canonicalize(executable)? {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "Unexpected desktop executable",
+            ));
+        }
+        Ok(pid)
+    }
 }
 
 #[cfg(test)]

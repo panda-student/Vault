@@ -50,6 +50,7 @@
 !/scripts/setup-updater.ps1
 !/scripts/verify-update.mjs
 !/scripts/verify-mcp-handoff.mjs
+!/scripts/verify-unified-backend.mjs
 !/scripts/verify-browser-fill.mjs
 !/scripts/verify-browser-window.ps1
 !/scripts/verify-installer-handoff.mjs
@@ -66,6 +67,8 @@
 !/docs/prototypes/
 /docs/prototypes/*
 !/docs/prototypes/vault.html
+!/docs/prototypes/architecture.html
+!/docs/prototypes/architecture.json
 
 **/node_modules/
 **/target/

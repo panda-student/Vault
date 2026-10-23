@@ -476,7 +476,13 @@ impl UpdateService {
             Err(error) => self.failed(error),
         }
     }
-    pub fn prepare_install(&self, directory: &Path) -> Result<super::windows::UpdateLaunch> {
+    pub fn pause_connections(&self) -> Result<crate::mcp_bridge::control::Pause> {
+        if self.state.lock().map_err(|_| busy())?.status.phase != "ready" {
+            return Err(failure("UPDATE_NOT_READY", "请先完成更新包下载。"));
+        }
+        crate::mcp_bridge::control::Pause::begin(&self.runtime()?.executable)
+    }
+    pub fn prepare_install(&self, directory: &Path, pause: crate::mcp_bridge::control::Pause) -> Result<super::windows::UpdateLaunch> {
         let runtime = self.runtime()?;
         let (envelope, ready) = {
             let state = self.state.lock().map_err(|_| busy())?;
@@ -490,7 +496,6 @@ impl UpdateService {
         };
         let manifest = decode(&envelope, PUBLIC_KEY, env!("CARGO_PKG_VERSION"))?;
         verify_binary(&ready, &manifest)?;
-        let pause = crate::mcp_bridge::control::Pause::begin(&runtime.executable)?;
         runtime.claim()?;
         let result = (|| {
             let stage = runtime

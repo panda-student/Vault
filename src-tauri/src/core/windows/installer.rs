@@ -16,7 +16,7 @@ use windows::{
         },
         UI::{
             Shell::CommandLineToArgvW,
-            WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId},
+            WindowsAndMessaging::{EnumWindows, GetClassNameW, GetWindowThreadProcessId},
         },
     },
     core::{BOOL, BSTR, PCWSTR, PWSTR, w},
@@ -49,11 +49,20 @@ impl Desktop {
         unsafe { WaitForSingleObject(self.process.0, 0).0 == 0 }
     }
 }
+fn desktop_class(name: &str) -> bool {
+    // Current owned class plus the class observed in released Tauri GUIs.
+    // Never treat COM/IME or Tao's headless event target as a desktop window.
+    matches!(name, "vault.desktop" | "Tauri Window")
+}
 unsafe extern "system" fn enumerate(window: HWND, value: LPARAM) -> BOOL {
     let mut pid = 0;
     unsafe {
-        GetWindowThreadProcessId(window, Some(&mut pid));
-        (&mut *(value.0 as *mut BTreeSet<u32>)).insert(pid);
+        let mut class = [0u16; 256];
+        let length = GetClassNameW(window, &mut class);
+        if length > 0 && desktop_class(&String::from_utf16_lossy(&class[..length as usize])) {
+            GetWindowThreadProcessId(window, Some(&mut pid));
+            (&mut *(value.0 as *mut BTreeSet<u32>)).insert(pid);
+        }
     }
     true.into()
 }
@@ -182,7 +191,7 @@ pub(in crate::core) fn desktops(executable: &Path) -> Result<Vec<Desktop>> {
                 return Err(failed());
             }
             let args = command_line(pid)?;
-            if args.iter().any(|a| a == "--mcp" || a == "--mcp-service") {
+            if args.iter().any(|a| a == "--mcp") {
                 continue;
             }
             let directory = desktop_directory(&args, &target)?;
@@ -213,7 +222,7 @@ fn desktop_directory(args: &[String], executable: &Path) -> Result<PathBuf> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--data-dir" => directory = PathBuf::from(args.next().ok_or_else(failed)?),
-            "--background" => {}
+            "--background" | "--mcp-service" => {}
             "--update-health" => {
                 let marker = PathBuf::from(args.next().ok_or_else(failed)?);
                 let token = args.next().ok_or_else(failed)?;
@@ -267,6 +276,14 @@ pub(in crate::core) fn close(desktops: &[Desktop]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn installer_recognizes_gui_classes_without_restoring_helper_windows() {
+        assert!(desktop_class("vault.desktop"));
+        assert!(desktop_class("Tauri Window"));
+        for helper in ["Tao Thread Event Target", "OleMainThreadWndClass", "IME", "MSCTFIME UI"] {
+            assert!(!desktop_class(helper));
+        }
+    }
     #[test]
     fn restart_preserves_custom_directory_and_rejects_unknown_modes() {
         let exe = Path::new(r"D:\vault\vault.exe");

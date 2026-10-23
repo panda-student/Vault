@@ -1,3 +1,4 @@
+use super::super::windows::WindowsService;
 use crate::{
     error::{AppError, Result},
     vault::Vault,
@@ -55,7 +56,7 @@ fn failed(code: &'static str) -> AppError {
         "Local credential write failed; no file contents are returned.",
     )
 }
-pub fn execute(vault: &Vault, targets: &crate::fill::Targets, args: WriteArgs) -> Result<Value> {
+pub(super) fn execute(vault: &Vault, windows: &WindowsService, args: WriteArgs) -> Result<Value> {
     let resolve = || {
         resolve_field(
             vault,
@@ -65,7 +66,7 @@ pub fn execute(vault: &Vault, targets: &crate::fill::Targets, args: WriteArgs) -
         )
     };
     match args.target {
-        Destination::Input { target_id } => Ok(json!(targets.fill(&target_id, resolve)?)),
+        Destination::Input { target_id } => Ok(json!(windows.fill_target(&target_id, resolve)?)),
         Destination::File {
             path,
             mode,
@@ -124,27 +125,7 @@ pub fn execute(vault: &Vault, targets: &crate::fill::Targets, args: WriteArgs) -
                     if *current != *source {
                         return Err(failed("FILE_CHANGED"));
                     }
-                    // ReplaceFile preserves the existing destination ACL and metadata.
-                    use std::os::windows::ffi::OsStrExt;
-                    use windows::{
-                        Win32::Storage::FileSystem::{REPLACE_FILE_FLAGS, ReplaceFileW},
-                        core::PCWSTR,
-                    };
-                    let destination: Vec<u16> =
-                        path.as_os_str().encode_wide().chain(Some(0)).collect();
-                    let replacement: Vec<u16> =
-                        temporary.as_os_str().encode_wide().chain(Some(0)).collect();
-                    unsafe {
-                        ReplaceFileW(
-                            PCWSTR(destination.as_ptr()),
-                            PCWSTR(replacement.as_ptr()),
-                            PCWSTR::null(),
-                            REPLACE_FILE_FLAGS(0),
-                            None,
-                            None,
-                        )
-                    }
-                    .map_err(|_| failed("FILE_REPLACE_FAILED"))?;
+                    windows.replace_file(&path, &temporary)?;
                     Ok(())
                 })();
                 if result.is_err() {

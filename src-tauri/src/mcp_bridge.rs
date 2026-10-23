@@ -1,8 +1,7 @@
 //! Stable stdio adapter. Credentials and business operations stay in the worker's
 //! existing MCP adapter and Rust core. No write request is ever replayed.
 pub mod control;
-mod pipe;
-pub mod service;
+pub(crate) mod pipe;
 use fs2::FileExt;
 use serde_json::{Value, json};
 use std::{collections::HashMap, fs::OpenOptions, path::Path, process::Stdio, time::Duration};

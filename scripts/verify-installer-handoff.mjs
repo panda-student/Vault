@@ -19,12 +19,13 @@ const helper=resolve(process.env.VAULT_HELPER_EXE||'src-tauri/target/debug/local
 const expectedPayloadHash=createHash('sha256').update(await readFile(helper)).digest('hex');
 const oldHash=createHash('sha256').update(await readFile(executable)).digest('hex');
 const rollback=process.env.VAULT_TEST_ROLLBACK==='1';
-const report={passed:false,root,checks:[]},clients=[],transports=[];
+const report={passed:false,root,helperSha256:expectedPayloadHash,checks:[]},clients=[],transports=[];
 const check=(name,passed)=>{report.checks.push({name,passed:!!passed});console.log(`${passed?'PASS':'FAIL'} ${name}`);assert.ok(passed,name);};
 async function connect(){const c=new Client({name:'installer-handoff-audit',version:'1'});const t=new StdioClientTransport({command:executable,args:['--mcp','--data-dir',data],stderr:'pipe'});t.stderr?.resume();await c.connect(t);clients.push(c);transports.push(t);return c;}
 async function call(c,name,args){const r=await c.callTool({name,arguments:args});assert.ok(!r.isError);return r.structuredContent??JSON.parse(r.content.find(c=>c.type==='text').text);}
 const hash=async p=>createHash('sha256').update(await readFile(p)).digest('hex');
-let desktop,watcher,requestFinishedAt,desktopExitedAt,writeLock;
+let desktop,watcher,requestFinishedAt,desktopExitedAt,writeLock,processMonitor;
+let processTrace="";
 // Wait for the installer's own exit, not for pipe EOF held by GUI descendants.
 async function install(command,args){
  return new Promise((resolve,reject)=>{
@@ -35,14 +36,32 @@ async function install(command,args){
  });
 }
 try{
+ if(process.env.VAULT_TRACE_LAUNCH==='1'){
+  processMonitor=spawn('powershell.exe',['-NoProfile','-Command',`
+$seen=@{}
+while($true){
+ $items=Get-CimInstance Win32_Process -Filter "Name='vault-helper.exe' OR Name='vault.exe' OR Name='vault-0.5.8-setup.exe'"
+ foreach($item in $items){
+  if(!$seen.ContainsKey($item.ProcessId) -and $item.CommandLine -and $item.CommandLine.Contains($env:VAULT_TRACE_ROOT)){
+   $seen[$item.ProcessId]=$true
+   $parent=Get-CimInstance Win32_Process -Filter ('ProcessId='+$item.ParentProcessId)
+   [Console]::WriteLine((@{pid=$item.ProcessId;parent=$item.ParentProcessId;image=$item.ExecutablePath;command=$item.CommandLine;parentImage=$parent.ExecutablePath;parentCommand=$parent.CommandLine}|ConvertTo-Json -Compress))
+  }
+ }
+ Start-Sleep -Milliseconds 100
+}`],{windowsHide:true,env:{...process.env,VAULT_TRACE_ROOT:root},stdio:['ignore','pipe','ignore']});
+  processMonitor.stdout.on('data',data=>{processTrace+=String(data);});
+ }
+ // The desktop owns the unified host. Launch it first so the tracked PID is
+ // the host, rather than a second launcher's short-lived activation process.
+ desktop=spawn(executable,['--data-dir',data,'--background'],{windowsHide:true,stdio:'ignore'});
+ desktop.once('exit',()=>{desktopExitedAt=Date.now();});
+ await sleep(3000);
  const a=await connect(),b=await connect();const ids=transports.map(t=>t.pid);
  const entry=await call(a,'create_entries',{kind:'password',title:'Installer fixture',secret:'FAKE_INSTALLER_ONLY_6134'});
  // Exercise the old application's close-to-tray setting as well as a custom data path.
  await run('python',['-c',`import sqlite3,json,sys
 c=sqlite3.connect(sys.argv[1]);s=json.loads(c.execute("SELECT value FROM metadata WHERE name='settings'").fetchone()[0]);s['closeToTray']=True;c.execute("UPDATE metadata SET value=? WHERE name='settings'",(json.dumps(s).encode(),));c.commit();c.close()`,join(data,'vault.db')],{windowsHide:true});
- desktop=spawn(executable,['--data-dir',data,'--background'],{windowsHide:true,stdio:'ignore'});
- desktop.once('exit',()=>{desktopExitedAt=Date.now();});
- await sleep(3000);
  check('old desktop and two MCP transports are alive',desktop.exitCode===null&&transports.every(t=>t.pid));
  let inFlight;
  if(process.env.VAULT_TEST_DRAIN==='1'){
@@ -83,7 +102,10 @@ c=sqlite3.connect(sys.argv[1]);s=json.loads(c.execute("SELECT value FROM metadat
   check('in-flight write is committed once without replay',matches.entries.length===1&&matches.entries[0].id===result.id);
  }
  check(rollback?'old executable is restored after failed startup':'installed executable matches the packaged payload',await hash(executable)===(rollback?oldHash:expectedPayloadHash));
- const observed=JSON.parse((await run('powershell.exe',['-NoProfile','-Command',`$items=@(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $env:VAULT_AUDIT_IMAGE -and $_.CommandLine -notlike '*--mcp*' }); @{count=$items.Count;customData=(@($items | Where-Object { $_.CommandLine.Contains($env:VAULT_AUDIT_DATA) }).Count -eq 1)} | ConvertTo-Json -Compress`],{windowsHide:true,env:{...process.env,VAULT_AUDIT_IMAGE:executable,VAULT_AUDIT_DATA:data}})).stdout);
+ const observe=async()=>JSON.parse((await run('powershell.exe',['-NoProfile','-Command',`$items=@(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $env:VAULT_AUDIT_IMAGE -and $_.CommandLine -notlike '*--mcp*' }); @{items=@($items | Select-Object ProcessId,ParentProcessId,CommandLine);count=$items.Count;customData=(@($items | Where-Object { $_.CommandLine.Contains($env:VAULT_AUDIT_DATA) }).Count -eq 1)} | ConvertTo-Json -Compress`],{windowsHide:true,env:{...process.env,VAULT_AUDIT_IMAGE:executable,VAULT_AUDIT_DATA:data}})).stdout);
+ let observed=await observe();
+ const settled=Date.now()+10000;
+ while((observed.count!==1||!observed.customData)&&Date.now()<settled){await sleep(200);observed=await observe();}
  report.desktop=observed;console.log('Restarted desktop:',JSON.stringify(observed));
  check('exactly one desktop restarts with the original custom data path',observed.count===1&&observed.customData);
  for(const [index,c]of clients.entries()){
@@ -97,13 +119,33 @@ c=sqlite3.connect(sys.argv[1]);s=json.loads(c.execute("SELECT value FROM metadat
  report.executableSha256=await hash(executable);report.passed=true;
 }finally{
  clearInterval(watcher);
+ processMonitor?.kill();
+ if(processTrace)report.processTrace=processTrace.trim().split(/\r?\n/).map(line=>{try{return JSON.parse(line)}catch{return line}});
  writeLock?.kill();
  for(const c of clients)await c.close().catch(()=>{});
  // Only processes whose exact image is inside this unique fixture are cleanup targets.
  await run('powershell.exe',['-NoProfile','-Command',`Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $env:VAULT_AUDIT_IMAGE } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`],{windowsHide:true,env:{...process.env,VAULT_AUDIT_IMAGE:executable}}).catch(()=>{});
  if(process.env.VAULT_INSTALLER){
   // Registration is compiled into an audit namespace locally; never touch D:\\vault.
-  try{await sleep(800);if(existsSync(join(folder,'Uninstall.exe')))await install(join(folder,'Uninstall.exe'),['/S']);}catch{}
+  try{
+   // NSIS normally self-copies its uninstaller and exits the original launcher.
+   // _?= keeps this fixture cleanup synchronous, including registry removal.
+   await sleep(1000);
+   if(existsSync(join(folder,'Uninstall.exe'))){
+    const regName=process.env.VAULT_INSTALLER_REG_NAME||'vault-installer-audit';
+    let cleaned=false;
+    for(let attempt=0;attempt<12;attempt++){
+     const result=await run('powershell.exe',['-NoProfile','-Command',`
+$registered=(Get-ItemProperty -LiteralPath ('HKCU:/Software/'+$env:VAULT_AUDIT_REG) -ErrorAction SilentlyContinue).InstallDir
+if($registered -and $registered -ne $env:VAULT_AUDIT_FOLDER){throw 'Refusing to uninstall an unrelated registration'}
+$p=Start-Process -FilePath $env:VAULT_AUDIT_UNINSTALL -ArgumentList ('/S _?='+$env:VAULT_AUDIT_FOLDER) -WindowStyle Hidden -Wait -PassThru
+if($p.ExitCode -eq 0 -and !(Test-Path -LiteralPath ('HKCU:/Software/'+$env:VAULT_AUDIT_REG))){exit 0};exit 2
+`],{windowsHide:true,env:{...process.env,VAULT_AUDIT_REG:regName,VAULT_AUDIT_FOLDER:folder,VAULT_AUDIT_UNINSTALL:join(folder,'Uninstall.exe')}}).catch(()=>null);
+     if(result){cleaned=true;break;}await sleep(250);
+    }
+    report.fixtureCleanup=cleaned;if(!cleaned){report.passed=false;process.exitCode=1;}
+   }
+  }catch{report.fixtureCleanup=false;report.passed=false;process.exitCode=1;}
  }
  await mkdir('artifacts',{recursive:true});await writeFile(process.env.VAULT_HANDOFF_REPORT||'artifacts/installer-handoff-verification.json',JSON.stringify(report,null,2));
 }

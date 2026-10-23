@@ -1,7 +1,9 @@
 //! Windows capability service: startup integration and native human confirmation.
 use super::*;
 use std::path::Path;
+mod input;
 pub(super) mod installer;
+use crate::fill::FillStatus;
 pub(super) struct UpdateLaunch {
     pub helper: std::path::PathBuf,
     pub plan: std::path::PathBuf,
@@ -52,9 +54,56 @@ pub(super) fn start_updated(
 }
 #[derive(Default)]
 pub(super) struct WindowsService {
+    input: input::Targets,
     clipboard: std::sync::RwLock<Option<std::sync::Arc<dyn ClipboardPort>>>,
 }
 impl WindowsService {
+    pub fn capture_target(&self, request: CaptureRequest) -> Result<FillStatus> {
+        self.input.capture(request)
+    }
+    /// The resolver stays lazy: the native adapter validates the target before
+    /// obtaining plaintext, then rechecks focus immediately before typing.
+    pub fn fill_target<F>(&self, target: &str, resolve: F) -> Result<FillStatus>
+    where
+        F: FnOnce() -> Result<String>,
+    {
+        self.input.fill(target, resolve)
+    }
+    /// Preserve the destination ACL and metadata; never fall back to truncation.
+    pub fn replace_file(&self, destination: &Path, replacement: &Path) -> Result<()> {
+        use ::windows::{
+            Win32::Storage::FileSystem::{REPLACE_FILE_FLAGS, ReplaceFileW},
+            core::PCWSTR,
+        };
+        use std::os::windows::ffi::OsStrExt;
+        let destination: Vec<u16> = destination
+            .as_os_str()
+            .encode_wide()
+            .chain(Some(0))
+            .collect();
+        let replacement: Vec<u16> = replacement
+            .as_os_str()
+            .encode_wide()
+            .chain(Some(0))
+            .collect();
+        unsafe {
+            ReplaceFileW(
+                PCWSTR(destination.as_ptr()),
+                PCWSTR(replacement.as_ptr()),
+                PCWSTR::null(),
+                REPLACE_FILE_FLAGS(0),
+                None,
+                None,
+            )
+        }
+        .map_err(|_| {
+            AppError::new(
+                "FILE_REPLACE_FAILED",
+                "Local credential write failed; no file contents are returned.",
+            )
+        })
+    }
+
     pub fn launch_update(&self, launch: UpdateLaunch) -> Result<()> {
         use std::os::windows::process::CommandExt;
         std::process::Command::new(launch.helper)
@@ -116,5 +165,39 @@ impl WindowsService {
             )
         };
         Ok(answer == IDYES)
+    }
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use super::*;
+    #[test]
+    fn native_replace_preserves_destination_and_consumes_staging_file() {
+        let folder = tempfile::tempdir().unwrap();
+        let destination = folder.path().join("config.txt");
+        let staged = folder.path().join("staged.txt");
+        std::fs::write(&destination, "before").unwrap();
+        std::fs::write(&staged, "after").unwrap();
+        WindowsService::default()
+            .replace_file(&destination, &staged)
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(&destination).unwrap(), "after");
+        assert!(!staged.exists());
+    }
+    #[test]
+    fn native_replace_failure_keeps_staging_and_never_creates_destination() {
+        let folder = tempfile::tempdir().unwrap();
+        let destination = folder.path().join("missing.txt");
+        let staged = folder.path().join("staged.txt");
+        std::fs::write(&staged, "after").unwrap();
+        assert_eq!(
+            WindowsService::default()
+                .replace_file(&destination, &staged)
+                .unwrap_err()
+                .code,
+            "FILE_REPLACE_FAILED"
+        );
+        assert!(!destination.exists());
+        assert_eq!(std::fs::read_to_string(&staged).unwrap(), "after");
     }
 }

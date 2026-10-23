@@ -781,3 +781,33 @@ fn configuration_lowercases_only_product_path_segments() {
     assert_eq!(configuration_path(Path::new(r"D:\Vault\Vault.exe")),std::path::PathBuf::from(r"D:\vault\vault.exe"));
     assert_eq!(configuration_path(Path::new(r"D:\PrivateData\MyVault\data")),std::path::PathBuf::from(r"D:\PrivateData\MyVault\data"));
 }
+
+#[test]
+fn filling_business_code_cannot_bypass_windows_capability_service() {
+    for source in [
+        include_str!("filling.rs"),
+        include_str!("filling/write.rs"),
+        include_str!("../fill.rs"),
+    ] {
+        for native in [
+            "Win32::", "SendInput", "ReplaceFileW", "GetForegroundWindow", "UIA_",
+            r#"extern "system""#,
+        ] {
+            assert!(!source.contains(native), "business module contains native API: {native}");
+        }
+    }
+}
+
+#[test]
+fn desktop_and_mcp_sessions_share_one_core_without_sharing_identity() {
+    let directory = tempfile::tempdir().unwrap();
+    let desktop = open(directory.path(), false).unwrap();
+    let mcp = desktop.mcp_session();
+    assert!(Arc::ptr_eq(&desktop.service, &mcp.service));
+    assert!(Arc::ptr_eq(&desktop.execution_gate, &mcp.execution_gate));
+    assert!(Arc::ptr_eq(&desktop.guard, &mcp.guard));
+    assert!(mcp.mcp_session().caller == permissions::Caller::Mcp);
+    assert!(desktop.caller == permissions::Caller::Desktop);
+    assert_eq!(mcp.execute(Operation::Settings).unwrap_err().code, "PERMISSION_DENIED");
+    assert!(desktop.execute(Operation::Settings).is_ok());
+}

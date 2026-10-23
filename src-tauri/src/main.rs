@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod ai_output;
+mod backend;
 mod core;
-mod credential_write;
 mod crypto;
 mod error;
 mod fill;
@@ -44,6 +44,7 @@ struct AppState {
     smoke_report: Option<PathBuf>,
     smoke_finished: AtomicBool,
     update_health: Option<(PathBuf, String)>,
+    backend: backend::Host,
 }
 #[tauri::command]
 async fn update_action(
@@ -72,6 +73,7 @@ async fn update_action(
 #[serde(rename_all = "camelCase")]
 struct DesktopInfo {
     version: &'static str,
+    backend_pid: u32,
     executable: PathBuf,
     data_directory: PathBuf,
     webview_version: String,
@@ -83,6 +85,7 @@ struct DesktopInfo {
 fn desktop_info(state: tauri::State<'_, AppState>) -> Result<DesktopInfo> {
     Ok(DesktopInfo {
         version: env!("CARGO_PKG_VERSION"),
+        backend_pid: std::process::id(),
         executable: state.executable.clone(),
         data_directory: state.core.directory().to_owned(),
         webview_version: tauri::webview_version()
@@ -346,16 +349,52 @@ fn finish_smoke(
     );
     Ok(())
 }
-fn show_main(app: &tauri::AppHandle) {
+fn open_main(app: &tauri::AppHandle, visible: bool) -> std::result::Result<(), Box<dyn std::error::Error>> {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
+        if visible { window.show()?; window.unminimize()?; window.set_focus()?; }
+        return Ok(());
     }
+    let state = app.state::<AppState>();
+    let is_smoke = state.smoke_report.is_some();
+            let builder =
+                WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                    .title("本地密码库")
+                    .window_classname("vault.desktop")
+                    .inner_size(1120.0, 740.0)
+                    .min_inner_size(900.0, 580.0)
+                    .focused(!is_smoke)
+                    .visible(visible)
+                    .data_directory(state.core.directory().join("webview"));
+            // A debug build can expose only its explicitly selected fixture window
+            // for native UI inspection. Release builds do not include this hook.
+            #[cfg(debug_assertions)]
+            let builder = if let Ok(port) = std::env::var("VAULT_UI_DEBUG_PORT") {
+                let port = port.parse::<u16>().map_err(|_| "Invalid UI debug port")?;
+                builder.additional_browser_args(&format!("--remote-debugging-port={port}"))
+            } else {
+                builder
+            };
+            let window = builder.build()?;
+            let observed = window.clone();
+            window.on_window_event(move |event| {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event
+                    && observed
+                        .state::<AppState>()
+                        .core
+                        .call::<Settings>(Operation::Settings)
+                        .is_ok_and(|s| s.close_to_tray)
+                {
+                    api.prevent_close();
+                    let _ = observed.hide();
+                }
+            });
+    Ok(())
 }
+fn show_main(app: &tauri::AppHandle) { let _ = open_main(app, true); }
 fn desktop(
     state: AppState,
     background: bool,
+    headless: bool,
 ) -> std::result::Result<(), Box<dyn std::error::Error>> {
     if tauri::webview_version().is_err() {
         return Err("需要 Microsoft Edge WebView2 Runtime，请从 https://developer.microsoft.com/microsoft-edge/webview2/ 获取。".into());
@@ -388,42 +427,13 @@ fn desktop(
             finish_smoke
         ])
         .setup(move |app| {
+            let result: std::result::Result<(), Box<dyn std::error::Error>> = (|| {
             let state = app.state::<AppState>();
             state
                 .core
                 .bind_clipboard(Arc::new(DesktopClipboard(app.handle().clone())))?;
             let is_smoke = state.smoke_report.is_some();
-            let builder =
-                WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                    .title("本地密码库")
-                    .inner_size(1120.0, 740.0)
-                    .min_inner_size(900.0, 580.0)
-                    .focused(!is_smoke)
-                    .visible(!background)
-                    .data_directory(state.core.directory().join("webview"));
-            // A debug build can expose only its explicitly selected fixture window
-            // for native UI inspection. Release builds do not include this hook.
-            #[cfg(debug_assertions)]
-            let builder = if let Ok(port) = std::env::var("VAULT_UI_DEBUG_PORT") {
-                let port = port.parse::<u16>().map_err(|_| "Invalid UI debug port")?;
-                builder.additional_browser_args(&format!("--remote-debugging-port={port}"))
-            } else {
-                builder
-            };
-            let window = builder.build()?;
-            let observed = window.clone();
-            window.on_window_event(move |event| {
-                if let tauri::WindowEvent::CloseRequested { api, .. } = event
-                    && observed
-                        .state::<AppState>()
-                        .core
-                        .call::<Settings>(Operation::Settings)
-                        .is_ok_and(|s| s.close_to_tray)
-                {
-                    api.prevent_close();
-                    let _ = observed.hide();
-                }
-            });
+            if !headless { open_main(app.handle(), !background)?; }
             let open = MenuItem::with_id(app, "open", "打开本地密码库", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &quit])?;
@@ -452,6 +462,10 @@ fn desktop(
                 tray = tray.icon(icon.clone());
             }
             tray.build(app)?;
+            // A normal/health startup creates its window before the pause-aware
+            // listener starts. Otherwise an in-progress update could stop the
+            // host as headless just before it writes the health marker.
+            state.backend.start(app.handle().clone(), state.core.clone())?;
             if let Some((path, token)) = &state.update_health {
                 std::fs::write(path, token)?;
             }
@@ -472,8 +486,24 @@ fn desktop(
                 });
             }
             Ok(())
+            })();
+            // A failed update health probe is an expected rollback condition.
+            // Returning Err here makes Tauri panic during RuntimeReady; on Windows
+            // crash recovery can relaunch an untracked child with the health args.
+            if result.is_err() && app.state::<AppState>().update_health.is_some() {
+                app.handle().exit(1);
+                return Ok(());
+            }
+            result
         })
-        .run(tauri::generate_context!())?;
+        .build(tauri::generate_context!())?
+        .run(|app, event| {
+            // Closing the desktop window does not interrupt a connected MCP client.
+            // Explicit tray quit and update exits retain their explicit exit code.
+            if let tauri::RunEvent::ExitRequested { code: None, api, .. } = event {
+                if app.state::<AppState>().backend.has_clients() { api.prevent_exit(); }
+            }
+        });
     Ok(())
 }
 fn show_error(message: &str) {
@@ -591,11 +621,16 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     if is_mcp && !mcp_service {
         return mcp_bridge::run(&executable, &directory);
     }
-    if mcp_service {
-        return mcp_bridge::service::run(&executable, &directory);
-    }
+    // A legacy --mcp-service launcher now starts the same desktop-capable host.
+    // Identity remains bound by the host, never by a protocol field.
+    let Some(backend) = backend::Host::acquire(&executable, &directory)? else {
+        if report.is_some() || update_health.is_some() {
+            return Err("An isolated test or update launch found an existing backend".into());
+        }
+        return backend::activate(&executable, &directory, background || mcp_service);
+    };
     let runtime = core::UpdateRuntime::acquire(&executable)?;
-    let core = core::open(&directory, is_mcp)?;
+    let core = core::open(&directory, false)?;
     core.bind_update_runtime(runtime)?;
     desktop(
         AppState {
@@ -604,8 +639,10 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
             smoke_report: report,
             smoke_finished: AtomicBool::new(false),
             update_health,
+            backend,
         },
         background,
+        mcp_service,
     )
 }
 fn main() {
