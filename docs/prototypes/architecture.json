@@ -1,0 +1,313 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "vault · 桌面与 MCP 共用一个 Rust 后端",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1390,
+      870
+    ]
+  },
+  "components": [
+    {
+      "id": "ui",
+      "type": "frontend",
+      "label": "桌面界面",
+      "sublabel": "WebView：只负责界面交互",
+      "pos": [
+        120,
+        20
+      ],
+      "size": [
+        240,
+        72
+      ]
+    },
+    {
+      "id": "ai",
+      "type": "external",
+      "label": "AI 客户端",
+      "sublabel": "Trae / Codex 等",
+      "pos": [
+        600,
+        20
+      ],
+      "size": [
+        240,
+        72
+      ]
+    },
+    {
+      "id": "bridge",
+      "type": "messagebus",
+      "label": "MCP 连接桥",
+      "sublabel": "独立 stdio 适配进程，不持有密码库",
+      "pos": [
+        1080,
+        20
+      ],
+      "size": [
+        240,
+        72
+      ]
+    },
+    {
+      "id": "tauri",
+      "type": "backend",
+      "label": "桌面命令适配器",
+      "sublabel": "Tauri：绑定桌面身份",
+      "pos": [
+        120,
+        230
+      ],
+      "size": [
+        240,
+        72
+      ]
+    },
+    {
+      "id": "mcp",
+      "type": "messagebus",
+      "label": "MCP 协议适配器",
+      "sublabel": "命名管道：固定 MCP 身份",
+      "pos": [
+        1080,
+        230
+      ],
+      "size": [
+        240,
+        72
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "统一操作接口",
+      "sublabel": "execute：先鉴权，再分发",
+      "pos": [
+        600,
+        380
+      ],
+      "size": [
+        240,
+        72
+      ]
+    },
+    {
+      "id": "permissions",
+      "type": "security",
+      "label": "权限服务",
+      "sublabel": "默认 / 标签 / 凭据规则",
+      "pos": [
+        180,
+        380
+      ],
+      "size": [
+        240,
+        72
+      ]
+    },
+    {
+      "id": "storage",
+      "type": "backend",
+      "label": "存储服务",
+      "sublabel": "凭据 / 标签 / 垃圾桶 / 事务",
+      "pos": [
+        120,
+        550
+      ],
+      "size": [
+        240,
+        72
+      ]
+    },
+    {
+      "id": "filling",
+      "type": "backend",
+      "label": "填写服务",
+      "sublabel": "凭据解析 / 模板 / 流程编排",
+      "pos": [
+        440,
+        550
+      ],
+      "size": [
+        240,
+        72
+      ]
+    },
+    {
+      "id": "windows",
+      "type": "backend",
+      "label": "Windows 能力服务",
+      "sublabel": "UIA / SendInput / 文件替换 / 剪贴板",
+      "pos": [
+        760,
+        550
+      ],
+      "size": [
+        240,
+        72
+      ]
+    },
+    {
+      "id": "updater",
+      "type": "backend",
+      "label": "更新服务",
+      "sublabel": "签名校验 / 下载 / 安装编排",
+      "pos": [
+        1080,
+        550
+      ],
+      "size": [
+        240,
+        72
+      ]
+    },
+    {
+      "id": "database",
+      "type": "database",
+      "label": "加密存储实现",
+      "sublabel": "SQLite / AES-256-GCM / DPAPI",
+      "pos": [
+        120,
+        650
+      ],
+      "size": [
+        240,
+        72
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "唯一 Rust 后端宿主进程 · 桌面和所有 MCP 连接共同使用",
+      "wraps": [
+        "tauri",
+        "mcp",
+        "api",
+        "permissions",
+        "storage",
+        "filling",
+        "windows",
+        "updater",
+        "database"
+      ],
+      "pad": 65
+    },
+    {
+      "kind": "security-group",
+      "label": "Rust 核心 · 一份服务实例，不同身份的受控会话",
+      "wraps": [
+        "api",
+        "permissions",
+        "storage",
+        "filling",
+        "windows",
+        "updater",
+        "database"
+      ],
+      "pad": 35
+    },
+    {
+      "kind": "region",
+      "label": "存储模块",
+      "wraps": [
+        "storage",
+        "database"
+      ],
+      "pad": 22
+    }
+  ],
+  "connections": [
+    {
+      "from": "ui",
+      "to": "tauri",
+      "label": "Tauri IPC",
+      "labelDy": 35
+    },
+    {
+      "from": "ai",
+      "to": "bridge",
+      "label": "MCP / stdio"
+    },
+    {
+      "from": "bridge",
+      "to": "mcp",
+      "label": "当前用户专用管道",
+      "labelDy": 35
+    },
+    {
+      "from": "tauri",
+      "to": "api"
+    },
+    {
+      "from": "mcp",
+      "to": "api"
+    },
+    {
+      "from": "api",
+      "to": "permissions",
+      "label": "调用鉴权",
+      "labelDy": 25
+    },
+    {
+      "from": "api",
+      "to": "storage",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "from": "api",
+      "to": "filling",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "from": "api",
+      "to": "windows",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "from": "api",
+      "to": "updater"
+    },
+    {
+      "from": "filling",
+      "to": "storage",
+      "label": "解析凭据"
+    },
+    {
+      "from": "filling",
+      "to": "windows",
+      "label": "原生输入"
+    },
+    {
+      "from": "storage",
+      "to": "database",
+      "label": "加密读写",
+      "labelDy": 25
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "边框表示包含，箭头表示调用",
+      "items": [
+        "最外框是唯一业务后端；内部包含两个适配器和一套 Rust 核心。",
+        "MCP 连接桥只保持连接，不创建第二套核心或密码库。"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "共享服务，身份与权限仍然隔离",
+      "items": [
+        "桌面与 MCP 共享状态、输入目标和更新锁；MCP 无法切换为桌面身份。",
+        "安装辅助程序只在升级时临时启动，不是第二个常驻业务后端。"
+      ]
+    }
+  ]
+}

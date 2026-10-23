@@ -100,9 +100,9 @@ node scripts/verify-next.mjs
 - `src-tauri/src/vault/`：数据模型、组织方式、垃圾桶。
 - `vault.rs` / `crypto.rs`：加密存储与密钥保护。
 - `mcp.rs` / `ai_output.rs`：AI 接口及敏感输出过滤。
-- `fill.rs` / `credential_write.rs`：焦点输入、文件引用写入。
+- `core/filling/` / `core/windows/input.rs`：文件引用写入与原生焦点输入；`fill.rs` 定义输入协议类型。
 
-桌面命令与 MCP 均通过 `CoreSession.execute(Operation)` 调用业务能力。核心接口先检查权限，再调度存储、填写和 Windows 能力服务。桌面保留绑定身份的本地会话；多个 MCP 连接通过 Windows 用户专用命名管道共享一个后台核心，连接桥不访问密码库。详见 [架构说明](docs/ARCHITECTURE.md)。
+桌面命令与 MCP 均通过 `CoreSession.execute(Operation)` 调用业务能力。核心接口先检查权限，再调度存储、填写和 Windows 能力服务。桌面与所有 MCP 连接共用一个 Rust 后端宿主，身份隔离的会话共享同一份核心服务。MCP 连接桥不访问密码库；再次打开桌面只激活已有宿主，关闭窗口不打断已连接的 MCP。详见 [架构说明](docs/ARCHITECTURE.md)。
 
 在「MCP 管理 → 权限管理」中可分别允许或禁止 MCP 读取元数据、新增、修改、移入垃圾桶、窗口填写及文件写入，保存后后续调用立即受新规则约束。默认兼容已有权限。MCP 原文读取、权限修改和永久删除固定禁止，不能通过打开开关获得这些能力。
 

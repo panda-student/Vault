@@ -1,31 +1,39 @@
 # 现有实现：统一操作接口与五个核心服务
 
-桌面模式与 `--mcp` 模式都通过 `CoreSession.execute(Operation)` 进入核心，`call<T>` 只是执行后将结果转换为类型的便捷方法。桌面保留身份已绑定的本地会话；同一 Windows 身份、同一 EXE 与规范化密码库目录下的所有 MCP 连接，共享一个后台核心进程和会话。每个客户端只保留轻量 stdio 连接桥，不单独打开密码库。
+同一 Windows 用户、同一 EXE 路径与规范化密码库目录，只启动一个 Rust 后端宿主。桌面 WebView 通过 Tauri 命令适配器调用它；AI 客户端通过轻量 stdio 连接桥、用户专用命名管道和 MCP 适配器调用它。宿主在打开密码库前取得唯一服务锁，重复的桌面启动只激活已有宿主，不再创建另一套核心。MCP 先启动时宿主不创建 WebView，之后打开桌面在同一宿主内创建窗口。历史 `--mcp-service` 启动参数继续兼容，但现在启动的是同一个通用后端宿主；对应实现位于 `backend.rs`，不再有专供 MCP 的第二套核心。
+
+宿主只打开一次核心。桌面与 MCP 的 `CoreSession` 身份不同，但共享同一个 `Arc<CoreService>`、执行门、填写目标、输出保护状态和更新运行锁。MCP 会话只能由宿主创建为受限身份，协议请求不接受调用者身份字段。
 
 ```mermaid
 flowchart TD
-  UI[Vue / WebView2] --> Desktop[桌面适配器 main.rs]
-  AI[多个 AI 客户端] --> Bridge[每连接一个轻量 stdio 适配器]
-  Bridge --> Pipe[当前用户专用 Windows 命名管道]
-  Pipe --> Shared[唯一 MCP 核心进程 / 按需启动]
-  Shared --> MCP[MCP 适配器 mcp.rs]
-  Desktop --> API[统一接口 CoreSession / Operation]
-  MCP --> API
-  API --> Policy[权限服务 permissions.rs：每次先鉴权]
-  API --> Storage[存储服务 storage.rs：授权后读写]
-  API --> Filling[填写服务 filling.rs：授权后填写]
-  API --> Windows[Windows 能力服务 windows.rs：授权后调用]
-  API --> Updater[更新服务 updater.rs：仅桌面]
-  Updater --> Windows
-  Updater --> Releases[GitHub Releases：签名元数据和更新包]
-  Actions[GitHub Actions：测试、构建、签名和发布] --> Releases
-  Storage --> Vault[vault / 标签 / 垃圾桶 / 事务]
-  Vault --> Crypto[AES-256-GCM / Windows DPAPI]
-  Vault --> DB[(SQLite)]
-  Filling --> Vault
-  Filling --> Dest[文件 / 可输入窗口]
-  Windows --> Native[启动项 / 原生确认 / 剪贴板端口]
+  UI[桌面 WebView] --> Desktop
+  AI[AI 客户端] --> Bridge[每连接一个 stdio 连接桥]
+  Bridge --> MCP
+  subgraph Host[唯一 Rust 后端宿主进程]
+    Desktop[桌面命令适配器 / Tauri]
+    MCP[MCP 协议适配器 / 用户专用命名管道]
+    Desktop --> API
+    MCP --> API
+    subgraph Core[Rust 核心 / 一份服务实例]
+      API[统一接口 CoreSession.execute]
+      API --> Policy[权限服务 / 每次操作授权]
+      API --> Storage
+      API --> Filling[填写服务 / 解析与编排]
+      API --> Windows[Windows 能力 / 定位和输入等原生操作]
+      API --> Updater[更新服务 / 仅桌面]
+      Filling --> Storage
+      Filling --> Windows
+      Updater --> Windows
+      subgraph Persistence[存储模块]
+        Storage[存储服务]
+        Storage --> Vault[加密存储 / 标签 / 垃圾桶 / 事务]
+        Vault --> Crypto[AES-256-GCM / DPAPI]
+        Vault --> DB[(SQLite)]
+      end
+    end
+  end
 ```
+
 
 箭头表示模块调用依赖，不表示串行数据流。接口层先调用权限服务，通过后才分发业务操作；权限服务不执行存储或填写。
 
@@ -35,17 +43,18 @@ flowchart TD
 | --- | --- | --- |
 | 表现层 | `src/components/`、`src/useVault.ts` | 界面、草稿、标签与权限矩阵 |
 | 桌面适配器 | `main.rs` | 将 Tauri 命令转换为统一操作，组装窗口、托盘和剪贴板 OS 端口 |
+| 后端宿主 | `backend.rs` | 唯一宿主服务锁、MCP 监听、桌面激活、连接排空和空闲退出 |
 | MCP 连接适配器 | `mcp_bridge.rs`、`mcp_bridge/` | 保留 stdio 连接、连接唯一共享核心、等待请求完成并暂停/恢复；不访问凭据 |
 | MCP 适配器 | `mcp.rs`、`ai_output.rs` | 共享核心中的协议会话、参数与单条/批量格式转换，过滤协议帧 |
 | 核心接口 | `core.rs`、`core/interface.rs` | 绑定调用身份，接收统一操作，先鉴权再调度，按身份生成返回结果 |
 | 权限服务 | `core/permissions.rs` | 默认权限、标签规则、单条例外、MCP 总开关及固定边界；工具发现和操作执行使用同一策略 |
 | 存储服务 | `core/storage.rs`、`core/ai.rs` | 凭据业务、版本校验、标签、垃圾桶和 AI 安全元数据投影 |
-| 填写服务 | `core/filling.rs` | 持有输入目标，协调本地引用解析与窗口/文件填写 |
+| 填写服务 | `core/filling.rs`、`core/filling/write.rs` | 解析凭据引用、处理文件模板与冲突检测，通过 Windows 服务执行原生操作 |
 | 更新服务 | `core/updater.rs` | 签名版本、下载、完整性校验、安装编排与失败回退 |
-| Windows 能力服务 | `core/windows.rs` | 启动设置、原生永久删除确认、剪贴板校验与端口调用 |
-| 底层实现 | `vault.rs`、`vault/`、`crypto.rs`、`credential_write.rs`、`fill.rs`、`startup.rs` | 加密存储、事务、文件和系统输入等实现细节 |
+| Windows 能力服务 | `core/windows.rs`、`core/windows/input.rs`、`core/windows/input/locator.rs`、`core/windows/installer.rs` | 维护一次性输入目标，执行 UIA 定位、SendInput、原子文件替换、启动设置、原生确认、剪贴板与进程操作 |
+| 底层实现 | `vault.rs`、`vault/`、`crypto.rs`、`fill.rs`（输入协议类型）、`startup.rs` | 加密存储、事务、文件和系统输入等实现细节 |
 
-`CoreService` 和服务模块不向适配器开放。适配器只持有身份已绑定的 `CoreSession`。核心的 `Caller` 不可由请求反序列化；`Operation` 也不包含可由客户端填写的调用身份。启动组装代码根据进程模式绑定桌面或 MCP 身份，会话不能切换身份。
+`CoreService` 和服务模块不向适配器开放。适配器只持有身份已绑定的 `CoreSession`。核心的 `Caller` 不可由请求反序列化；`Operation` 也不包含可由客户端填写的调用身份。唯一宿主先绑定桌面会话，再派生只能降权为 MCP 身份的会话；两者持有同一份核心服务，MCP 不能获得桌面会话。
 
 ## 统一接口与返回规则
 
@@ -76,7 +85,7 @@ flowchart TD
 
 永久清空由核心收集垃圾桶快照，调用 Windows 服务显示原生确认框（默认取消），确认后核验快照再删除。既不能传一个 `confirmed=true` 绕过，也不能通过 MCP 调用该操作。
 
-存储层调用加密再执行 SQL；加密模块不负责存数据库。ID、版本、时间等结构元数据保持可查询，凭据内容加密保存。填写服务内部使用同一存储服务中的密码库。DPAPI 绑定和数据库版本保持原有约定。
+存储层调用加密再执行 SQL；加密模块不负责存数据库。ID、版本、时间等结构元数据保持可查询，凭据内容加密保存。填写服务内部使用同一存储服务中的密码库。Windows 能力服务不持有密码库；输入方法接收延迟解析回调，先验证目标，再解析凭据，输入前再次核对焦点。原来的目标有效期、一次性消费、按键缓冲清零与秘密清零保持不变。文件模板、占位符、冲突检测与暂存文件清理属于填写服务，`ReplaceFileW` 由 Windows 能力服务封装。DPAPI 绑定和数据库版本保持原有约定。
 
 ## 验证
 
@@ -109,22 +118,32 @@ v3 格式把旧分组迁移为同名标签并去重，原账号、密码、地�
 已有 v1/v2 数据库升级前通过 SQLite `VACUUM INTO` 生成一致的加密备份，位于数据目录的 `backups/before-tags-permissions-*.db`。迁移在事务中完成，重新打开不会重复修改已迁移条目的版本。旧全局权限的显式配置继续保留；新密码库默认全部允许。
 ## 在线更新
 
-更新操作通过统一 Operation 接口，在核心被固定为 DesktopOnly。更新服务编排检查、下载与验签，Windows 能力服务执行进程启动。两入口启动时先获取共享运行锁，更新需取得独占锁。详细发布协议、数据保护、失败回退和验证边界见 [UPDATES.md](UPDATES.md)。
+更新操作通过统一 Operation 接口，在核心被固定为 DesktopOnly。更新服务编排检查、下载与验签，Windows 能力服务执行进程启动。只有唯一后端持有核心运行锁，更新需取得独占锁。详细发布协议、数据保护、失败回退和验证边界见 [UPDATES.md](UPDATES.md)。
 
 ## 更新期间的 MCP 生命周期
 
-更新协调按 EXE 路径覆盖所有相关 MCP 连接及不同密码库的共享核心。先拒绝新请求，等待已接收请求完成；连接桥关闭内部管道，共享核心释放存储和运行锁后确认暂停。更新辅助进程替换 EXE 并验证新版启动，或恢复旧版，然后解除暂停。原 stdio 连接进程保持不变，重新连接按唯一性规则启动的核心并在内部恢复握手；任何写请求都不自动重放。等待超时取消更新并自动恢复，其他桌面窗口和未迁移的旧版 MCP 仍需关闭或重连。
+更新协调按 EXE 路径覆盖所有相关连接和数据目录。连接桥先拒绝新请求并等待已有请求完成，关闭内部管道；后端确认所有 MCP 连接排空后确认暂停。没有桌面窗口的宿主退出并释放运行锁；有窗口的宿主保留桌面，供安装器自动关闭、替换并重启。原 stdio 连接桥保持不变，升级成功或回退后恢复协议握手；写请求不重放。
 
-共享核心使用启动锁与服务锁防止重复创建；命名管道限定当前用户和系统账户、拒绝远程连接，连接桥校验管道服务器所属用户。无客户端 5 秒后核心自动退出。所有进程由同一 EXE 启动，没有额外依赖或需安装的系统服务。
+在线更新在取得核心独占执行门之前先排空 MCP，避免已排队请求等待同一个执行门造成死锁。界面关闭时，如果还有 MCP 连接，后台继续运行；重新打开界面复用原宿主。没有界面和客户端时，宿主空闲 5 秒后退出。明确的托盘退出和更新重启会退出当前宿主；仍在线的连接桥按原机制重连并按需启动后台。
+
+命名管道限定当前用户和系统账户，拒绝远程连接。桌面二次启动使用独立的激活通道，只接受同用户、同 EXE 的进程发送 `show` 或 `background`；不接受操作、身份、路径或凭据载荷。MCP 的业务请求始终进入固定 MCP 身份的适配器。
 
 ## 浏览器填写目标（0.5.6）
 
-`CaptureTarget(CaptureRequest)` 和填写操作均先经过核心权限服务，再进入填写服务。`fill/locator.rs` 仅在本地按窗口标题、可选进程 ID 和输入框可访问名称定位唯一 Edit 控件，检查密码类型、可编辑性后取得原生焦点；不会读取控件值。UIA 查询有超时和并发限制，工作线程仅定位和聚焦，不持有或输入凭据。
+`CaptureTarget(CaptureRequest)` 和填写操作均先经过核心权限服务，再进入填写服务。`core/windows/input/locator.rs` 仅在本地按窗口标题、可选进程 ID 和输入框可访问名称定位唯一 Edit 控件，检查密码类型、可编辑性后取得原生焦点；不会读取控件值。UIA 查询有超时和并发限制，工作线程仅定位和聚焦，不持有或输入凭据。
 
-定位成功返回 30 秒有效的一次性目标。实际写入仍由原有 `fill.rs` 完成：解密前后校验前台窗口、原生焦点及 UIA Runtime ID，不符合就拒绝。无参数捕获继续兼容记事本、编辑器、终端等原生焦点路径。`input_sent` 只表示系统接收了键盘事件；浏览器验收单独检查实际 DOM 值及可信输入事件，不能把事件发送当成网页填写成功。
+定位成功返回 30 秒有效的一次性目标。实际写入仍由`core/windows/input.rs` 完成：解密前后校验前台窗口、原生焦点及 UIA Runtime ID，不符合就拒绝。无参数捕获继续兼容记事本、编辑器、终端等原生焦点路径。`input_sent` 只表示系统接收了键盘事件；浏览器验收单独检查实际 DOM 值及可信输入事件，不能把事件发送当成网页填写成功。
 
-## 分层调整方案（尚未按此合并代码）
+## 图中的包含关系
 
-桌面命令和 AI / MCP 进入核心权限边界，连接时绑定身份，每次操作按当前权限重新授权；授权后才进入业务分发。接口层下保留存储、更新、Windows 本地执行三组职责，拟把填写与 Windows 能力归为一组。权限边界仍由核心统一执行，不是适配器自行鉴权，也不是独立网络服务。
+最外层边框是唯一 Rust 后端进程，包含桌面适配器、MCP 适配器和 Rust 核心。核心边框包含统一接口、权限服务、存储、填写、Windows 能力和更新服务。存储模块再包含加密密码库实现。客户端和 stdio 连接桥位于宿主边框外；箭头表示调用，不代表包含。
 
-本地加密密码库属于存储实现，Windows DPAPI 属于平台能力，二者保持职责区分。下载、等待、替换和回退是更新流程，不在静态架构图展开。当前代码仍保留 `filling.rs` 与 `windows.rs` 两个模块，本节描述后续调整方向。
+## 安装和更新的私有启动入口
+
+`main.rs` 在普通核心会话建立前分流 `--installer-replace` 和 `--apply-update`，分别进入 `core/installer.rs` 与 `core/updater.rs` 的启动编排。这些入口用于程序文件替换、回退和重启，不是 MCP 工具，也不通过普通 `Operation` 接口。Windows 进程操作仍位于 `core/windows/`。安装器只把 `vault.desktop` 主窗口类和已发布版本使用的 `Tauri Window` 视为桌面窗口，再核对同用户、同 EXE 路径及进程创建时间；COM、IME 和无窗口事件目标不进入重启列表。
+
+交互架构图保存在 `docs/prototypes/architecture.html`，源规格为同目录的 `architecture.json`。图中的统一核心同时表示代码复用和运行时共享：桌面与 MCP 在同一宿主中持有身份隔离的会话，共享一份核心服务实例。
+
+## 单后端实测
+
+先运行 `node scripts/tauri.mjs build --debug --no-bundle`，再运行 `node scripts/verify-unified-backend.mjs`。它在隔离目录启动实际 Tauri WebView 与两个 MCP 客户端，分别验证桌面先启动和 MCP 先启动、唯一后台 PID、双向读写、实时权限撤销与恢复、激活通道拒绝其他进程、关闭和重开窗口不重建后台。报告为 `artifacts/unified-backend-verification.json`。调试端口仅存在于显式指定端口的 debug 构建，正式版没有该入口。
