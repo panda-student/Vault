@@ -58,6 +58,21 @@ pub(super) struct WindowsService {
     clipboard: std::sync::RwLock<Option<std::sync::Arc<dyn ClipboardPort>>>,
 }
 impl WindowsService {
+    pub fn open_url(&self, value: &str) -> Result<()> {
+        use ::windows::{
+            Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL},
+            core::{PCWSTR, w},
+        };
+        let url = browser_url(value)?;
+        let wide: Vec<u16> = url.as_str().encode_utf16().chain(Some(0)).collect();
+        let result = unsafe {
+            ShellExecuteW(None, w!("open"), PCWSTR(wide.as_ptr()), PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL)
+        };
+        if result.0 as isize <= 32 {
+            return Err(AppError::new("OPEN_URL_FAILED", "无法打开浏览器，请检查系统默认浏览器设置。"));
+        }
+        Ok(())
+    }
     pub fn capture_target(&self, request: CaptureRequest) -> Result<FillStatus> {
         self.input.capture(request)
     }
@@ -168,9 +183,32 @@ impl WindowsService {
     }
 }
 
+fn browser_url(value: &str) -> Result<reqwest::Url> {
+    let invalid = || AppError::new("INVALID_URL", "请输入完整的 HTTP 或 HTTPS 网页地址。链接不能包含账号密码。");
+    if value.len() > 8192 || value.chars().any(char::is_control) {
+        return Err(invalid());
+    }
+    let url = reqwest::Url::parse(value.trim()).map_err(|_| invalid())?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none()
+        || !url.username().is_empty() || url.password().is_some()
+    {
+        return Err(invalid());
+    }
+    Ok(url)
+}
+
 #[cfg(test)]
 mod capability_tests {
     use super::*;
+    #[test]
+    fn browser_links_allow_only_web_urls_without_embedded_credentials() {
+        for value in ["https://example.com/path?q=one#two", " http://127.0.0.1:1420/v1 ", "https://例子.中国"] {
+            assert!(browser_url(value).is_ok());
+        }
+        for value in ["", "example.com", "javascript:alert(1)", "file:///C:/test.txt", "mailto:a@b.com", "https://user:secret@example.com", "https://example.com/\0tail", "https://example.com/\n"] {
+            assert!(browser_url(value).is_err(), "accepted invalid URL");
+        }
+    }
     #[test]
     fn native_replace_preserves_destination_and_consumes_staging_file() {
         let folder = tempfile::tempdir().unwrap();

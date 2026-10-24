@@ -17,8 +17,8 @@ let lock;
 const check=(name,ok)=>{report.checks.push({name,passed:!!ok});assert.ok(ok,name);console.log('PASS',name);};
 async function connect(){const c=new Client({name:'shared-core-regression',version:'1'});const t=new StdioClientTransport({command:exe,args:['--mcp','--data-dir',data],stderr:'pipe'});await c.connect(t);c.transportFixture=t;clients.push(c);return c;}
 const call=async(c,name,args={})=>{const r=await c.callTool({name,arguments:args});assert(!r.isError);return r.structuredContent??JSON.parse(r.content[0].text);};
-async function services(){const command="@(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $env:VAULT_TEST_EXE -and $_.CommandLine.Contains('--mcp-service') -and $_.CommandLine.Contains($env:VAULT_TEST_DIR) } | Select-Object -ExpandProperty ProcessId) | ConvertTo-Json -Compress";const r=await run('powershell.exe',['-NoProfile','-Command',command],{windowsHide:true,env:{...process.env,VAULT_TEST_EXE:exe,VAULT_TEST_DIR:data}});const v=JSON.parse(r.stdout.trim()||'[]');return Array.isArray(v)?v:[v];}
-async function resumed(c){const end=Date.now()+20000;while(Date.now()<end){try{if((await c.listTools()).tools.length===12)return;}catch{}await pause(100);}throw Error('Original MCP connection did not resume');}
+async function services(){const command="@(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -eq $env:VAULT_TEST_EXE -and $_.CommandLine.Contains('--backend') -and $_.CommandLine.Contains($env:VAULT_TEST_DIR) } | Select-Object -ExpandProperty ProcessId) | ConvertTo-Json -Compress";const r=await run('powershell.exe',['-NoProfile','-Command',command],{windowsHide:true,env:{...process.env,VAULT_TEST_EXE:exe,VAULT_TEST_DIR:data}});const v=JSON.parse(r.stdout.trim()||'[]');return Array.isArray(v)?v:[v];}
+async function resumed(c){const end=Date.now()+20000;while(Date.now()<end){try{if((await c.listTools()).tools.length===11)return;}catch{}await pause(100);}throw Error('Original MCP connection did not resume');}
 try{
  const [a,b]=await Promise.all([connect(),connect()]);
  const pids=clients.map(c=>c.transportFixture.pid);

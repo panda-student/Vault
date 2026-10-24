@@ -67,10 +67,8 @@ pub(crate) struct Manifest {
     pub sha256: String,
     pub size: u64,
     pub notes: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub archive_sha256: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub archive_size: Option<u64>,
+    pub archive_sha256: String,
+    pub archive_size: u64,
 }
 
 fn decode(envelope: &Envelope, key: &str, current: &str) -> Result<Manifest> {
@@ -95,7 +93,7 @@ fn decode(envelope: &Envelope, key: &str, current: &str) -> Result<Manifest> {
     let manifest: Manifest = serde_json::from_slice(&bytes).map_err(|_| invalid_update())?;
     let version = semver::Version::parse(&manifest.version).map_err(|_| invalid_update())?;
     let current = semver::Version::parse(current).map_err(|_| invalid_update())?;
-    if !matches!(manifest.schema, 1 | 2)
+    if manifest.schema != 2
         || manifest.platform != "windows-x86_64"
         || version <= current
         || !version.pre.is_empty()
@@ -107,21 +105,12 @@ fn decode(envelope: &Envelope, key: &str, current: &str) -> Result<Manifest> {
     {
         return Err(invalid_update());
     }
-    let expected = match manifest.schema {
-        2 => {
-            if !manifest.archive_size.is_some_and(|n| (2..=MAX_PACKAGE).contains(&n))
-                || !manifest.archive_sha256.as_ref().is_some_and(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit())) {
-                return Err(invalid_update());
-            }
-            format!("https://github.com/panda-student/vault/releases/download/v{0}/vault-{0}.zip", manifest.version)
-        }
-        _ => format!("https://github.com/panda-student/vault/releases/download/v{}/vault.exe", manifest.version),
-    };
-    let legacy = format!("https://github.com/panda-student/local-password-manager/releases/download/v{}/vault.exe", manifest.version);
-    if !manifest.url.eq_ignore_ascii_case(&expected)
-        && !(manifest.schema == 1 && manifest.url.eq_ignore_ascii_case(&legacy)) {
+    if !(2..=MAX_PACKAGE).contains(&manifest.archive_size)
+        || (manifest.archive_sha256.len() != 64 || !manifest.archive_sha256.bytes().all(|b| b.is_ascii_hexdigit())) {
         return Err(invalid_update());
     }
+    let expected = format!("https://github.com/panda-student/vault/releases/download/v{0}/vault-{0}.zip", manifest.version);
+    if manifest.url != expected { return Err(invalid_update()); }
     Ok(manifest)
 }
 fn verify_binary(path: &Path, manifest: &Manifest) -> Result<()> {
@@ -157,11 +146,7 @@ fn verify_file(path: &Path, size: u64, hash: &str, magic: &[u8; 2]) -> Result<()
 fn extract_update_payload(archive: &Path, output: &Path, member: &str, size: u64) -> Result<()> {
     let file = File::open(archive).map_err(|_| invalid_update())?;
     let mut zip = zip::ZipArchive::new(file).map_err(|_| invalid_update())?;
-    // Read old signed packages too; new packages always contain lowercase vault.exe.
-    let legacy_member = member.strip_suffix("/vault.exe").map(|prefix| format!("{prefix}/Vault.exe"));
-    let index = zip.file_names().position(|name|name == member)
-        .or_else(||legacy_member.as_ref().and_then(|legacy|zip.file_names().position(|name|name==legacy)))
-        .ok_or_else(invalid_update)?;
+    let index = zip.file_names().position(|name| name == member).ok_or_else(invalid_update)?;
     let mut entry = zip.by_index(index).map_err(|_| invalid_update())?;
     if entry.size() != size || !entry.is_file() { return Err(invalid_update()); }
     let mut destination = OpenOptions::new().write(true).create_new(true).open(output).map_err(|_| invalid_update())?;
@@ -363,7 +348,7 @@ impl UpdateService {
                             phase: if same_ready { "ready" } else { "available" }.into(),
                             version: Some(manifest.version.clone()),
                             notes: manifest.notes.clone(),
-                            total: manifest.archive_size.filter(|_| manifest.schema == 2).unwrap_or(manifest.size),
+                            total: manifest.archive_size,
                             ..Default::default()
                         };
                         state.manifest = Some(manifest);
@@ -403,8 +388,8 @@ impl UpdateService {
             let partial = runtime.cache.join(format!("{}.part", uuid::Uuid::new_v4()));
             let unpacked = runtime.cache.join(format!("{}.exe", uuid::Uuid::new_v4()));
             let result = (|| {
-                let download_size = manifest.archive_size.filter(|_| manifest.schema == 2).unwrap_or(manifest.size);
-                let asset = if manifest.schema == 2 { format!("/vault-{}.zip", manifest.version) } else { "/vault.exe".into() };
+                let download_size = manifest.archive_size;
+                let asset = format!("/vault-{}.zip", manifest.version);
                 let url = test_source()
                     .map(|url| url.replace("/latest.json", &asset))
                     .unwrap_or_else(|| manifest.url.clone());
@@ -448,16 +433,11 @@ impl UpdateService {
                     AppError::storage().with("update.flush", &error.to_string())
                 })?;
                 drop(file);
-                let ready = if manifest.schema == 2 {
-                    verify_file(&partial, download_size, manifest.archive_sha256.as_deref().ok_or_else(invalid_update)?, b"PK")?;
-                    extract_update_payload(&partial, &unpacked, &format!("vault-{}/vault.exe", manifest.version), manifest.size)?;
-                    verify_binary(&unpacked, &manifest)?;
-                    fs::remove_file(&partial).map_err(|_| AppError::storage())?;
-                    unpacked.clone()
-                } else {
-                    verify_binary(&partial, &manifest)?;
-                    partial.clone()
-                };
+                verify_file(&partial, download_size, &manifest.archive_sha256, b"PK")?;
+                extract_update_payload(&partial, &unpacked, &format!("vault-{}/vault.exe", manifest.version), manifest.size)?;
+                verify_binary(&unpacked, &manifest)?;
+                fs::remove_file(&partial).map_err(|_| AppError::storage())?;
+                let ready = unpacked.clone();
                 let mut state = self.state.lock().map_err(|_| busy())?;
                 if let Some(old) = state.ready.replace(ready) {
                     let _ = fs::remove_file(old);
@@ -518,7 +498,7 @@ impl UpdateService {
                 parent: std::process::id(),
                 envelope,
                 token: uuid::Uuid::new_v4().to_string(),
-                pause_token: Some(pause.token.clone()),
+                pause_token: pause.token.clone(),
             };
             fs::write(
                 stage.join("plan.json"),
@@ -563,8 +543,7 @@ struct InstallPlan {
     parent: u32,
     envelope: Envelope,
     token: String,
-    #[serde(default)]
-    pause_token: Option<String>,
+    pause_token: String,
 }
 
 fn move_file(source: &Path, target: &Path) -> std::io::Result<()> {
@@ -617,9 +596,7 @@ pub fn apply_update(plan_path: &Path) -> Result<()> {
     {
         return Err(invalid_update());
     }
-    let _resume = plan.pause_token.as_deref()
-        .map(|token| crate::mcp_bridge::control::Pause::adopt(&plan.executable, token))
-        .transpose()?;
+    let _resume = crate::mcp_bridge::control::Pause::adopt(&plan.executable, &plan.pause_token)?;
     let manifest = decode(&plan.envelope, PUBLIC_KEY, env!("CARGO_PKG_VERSION"))?;
     let payload = stage.join("payload.exe");
     verify_binary(&payload, &manifest)?;
@@ -707,16 +684,16 @@ mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
     #[test]
-    fn lowercase_reader_accepts_the_legacy_signed_member_name() {
+    fn zip_reader_rejects_noncanonical_member_name() {
         use std::io::Write;
         let dir=tempfile::tempdir().unwrap();
-        let archive=dir.path().join("legacy.zip");
+        let archive=dir.path().join("noncanonical.zip");
         let mut zip=zip::ZipWriter::new(File::create(&archive).unwrap());
         zip.start_file("vault-0.5.5/Vault.exe",zip::write::SimpleFileOptions::default()).unwrap();
         zip.write_all(b"MZtest").unwrap();zip.finish().unwrap();
         let output=dir.path().join("payload.exe");
-        extract_update_payload(&archive,&output,"vault-0.5.5/vault.exe",6).unwrap();
-        assert_eq!(fs::read(output).unwrap(),b"MZtest");
+        assert!(extract_update_payload(&archive,&output,"vault-0.5.5/vault.exe",6).is_err());
+        assert!(!output.exists());
     }
     #[test]
     fn redirected_volume_fallback_preserves_bytes_and_does_not_overwrite() {
@@ -734,7 +711,7 @@ mod tests {
     }
     fn signed(version: &str, bytes: &[u8]) -> (Envelope, String) {
         let key = SigningKey::from_bytes(&[27; 32]);
-        let payload = serde_json::to_vec(&Manifest { schema: 1, version: version.into(), platform: "windows-x86_64".into(), url: format!("https://github.com/panda-student/vault/releases/download/v{version}/vault.exe"), sha256: format!("{:x}", Sha256::digest(bytes)), size: bytes.len() as u64, notes: "test".into(), archive_sha256: None, archive_size: None }).unwrap();
+        let payload = serde_json::to_vec(&Manifest { schema: 2, version: version.into(), platform: "windows-x86_64".into(), url: format!("https://github.com/panda-student/vault/releases/download/v{version}/vault-{version}.zip"), sha256: format!("{:x}", Sha256::digest(bytes)), size: bytes.len() as u64, notes: "test".into(), archive_sha256: "a".repeat(64), archive_size: 100 }).unwrap();
         (
             Envelope {
                 payload: STANDARD.encode(&payload),
@@ -753,38 +730,41 @@ mod tests {
         assert!(decode(&envelope, &key, "1.0.0").is_err());
     }
     #[test]
-    fn renamed_repository_preserves_signed_legacy_updates() {
+    fn updates_reject_previous_repositories_and_manifest_formats() {
         let (mut envelope, key) = signed("1.2.3", b"MZtest");
         let signing_key = SigningKey::from_bytes(&[27; 32]);
         let mut manifest = decode(&envelope, &key, "1.0.0").unwrap();
-        for (repository, accepted) in [("local-password-manager", true), ("untrusted", false)] {
+        for (repository, accepted) in [("local-password-manager", false), ("untrusted", false)] {
             manifest.url = format!("https://github.com/panda-student/{repository}/releases/download/v1.2.3/vault.exe");
             let payload = serde_json::to_vec(&manifest).unwrap();
             envelope.payload = STANDARD.encode(&payload);
             envelope.signature = STANDARD.encode(signing_key.sign(&payload).to_bytes());
             assert_eq!(decode(&envelope, &key, "1.0.0").is_ok(), accepted);
         }
+        manifest.schema = 1;
+        let payload = serde_json::to_vec(&manifest).unwrap();
+        envelope.payload = STANDARD.encode(&payload);
+        envelope.signature = STANDARD.encode(signing_key.sign(&payload).to_bytes());
+        assert!(decode(&envelope, &key, "1.0.0").is_err());
     }
     #[test]
     fn signed_zip_rejects_incomplete_metadata_and_wrong_asset() {
         let (mut envelope, key) = signed("1.2.3", b"MZtest");
         let signing_key = SigningKey::from_bytes(&[27; 32]);
-        let mut manifest = decode(&envelope, &key, "1.0.0").unwrap();
-        manifest.schema = 2;
-        manifest.url = "https://github.com/panda-student/vault/releases/download/v1.2.3/vault-1.2.3.zip".into();
-        for (size, hash, accepted) in [(None, None, false), (Some(100), Some("x".repeat(64)), false), (Some(100), Some("a".repeat(64)), true)] {
-            manifest.archive_size = size;
-            manifest.archive_sha256 = hash;
-            let payload = serde_json::to_vec(&manifest).unwrap();
+        let manifest = decode(&envelope, &key, "1.0.0").unwrap();
+        let mut invalid = serde_json::to_value(&manifest).unwrap();
+        let variants = [
+            { let mut v = invalid.clone(); v.as_object_mut().unwrap().remove("archive_size"); v },
+            { let mut v = invalid.clone(); v["archive_sha256"] = serde_json::json!("x".repeat(64)); v },
+            { let mut v = invalid.clone(); v["archive_size"] = serde_json::json!(0); v },
+            { invalid["url"] = serde_json::json!("https://github.com/panda-student/vault/releases/download/v1.2.3/vault.exe"); invalid },
+        ];
+        for value in variants {
+            let payload = serde_json::to_vec(&value).unwrap();
             envelope.payload = STANDARD.encode(&payload);
             envelope.signature = STANDARD.encode(signing_key.sign(&payload).to_bytes());
-            assert_eq!(decode(&envelope, &key, "1.0.0").is_ok(), accepted);
+            assert!(decode(&envelope, &key, "1.0.0").is_err());
         }
-        manifest.url = "https://github.com/panda-student/vault/releases/download/v1.2.3/vault.exe".into();
-        let payload = serde_json::to_vec(&manifest).unwrap();
-        envelope.payload = STANDARD.encode(&payload);
-        envelope.signature = STANDARD.encode(signing_key.sign(&payload).to_bytes());
-        assert!(decode(&envelope, &key, "1.0.0").is_err());
     }
     #[test]
     fn zip_extraction_only_writes_expected_member_and_enforces_size() {

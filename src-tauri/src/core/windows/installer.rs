@@ -50,9 +50,9 @@ impl Desktop {
     }
 }
 fn desktop_class(name: &str) -> bool {
-    // Current owned class plus the class observed in released Tauri GUIs.
+    // Only the owned desktop class belongs to the current backend.
     // Never treat COM/IME or Tao's headless event target as a desktop window.
-    matches!(name, "vault.desktop" | "Tauri Window")
+    name == "vault.desktop"
 }
 unsafe extern "system" fn enumerate(window: HWND, value: LPARAM) -> BOOL {
     let mut pid = 0;
@@ -222,7 +222,7 @@ fn desktop_directory(args: &[String], executable: &Path) -> Result<PathBuf> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--data-dir" => directory = PathBuf::from(args.next().ok_or_else(failed)?),
-            "--background" | "--mcp-service" => {}
+            "--background" | "--backend" => {}
             "--update-health" => {
                 let marker = PathBuf::from(args.next().ok_or_else(failed)?);
                 let token = args.next().ok_or_else(failed)?;
@@ -279,7 +279,7 @@ mod tests {
     #[test]
     fn installer_recognizes_gui_classes_without_restoring_helper_windows() {
         assert!(desktop_class("vault.desktop"));
-        assert!(desktop_class("Tauri Window"));
+        assert!(!desktop_class("Tauri Window"));
         for helper in ["Tao Thread Event Target", "OleMainThreadWndClass", "IME", "MSCTFIME UI"] {
             assert!(!desktop_class(helper));
         }

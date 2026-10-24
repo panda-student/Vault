@@ -17,7 +17,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 mod interface;
-pub use interface::{ClipboardPort, FieldRequest, FillRequest, Operation, Search};
+pub use interface::{ClipboardPort, FieldRequest, Operation, Search};
 mod ai;
 mod filling;
 mod permissions;
@@ -249,6 +249,10 @@ impl CoreSession {
             }
         }
         let result = match operation {
+            Operation::OpenUrl(url) => {
+                self.service.windows.open_url(&url)?;
+                Ok(Value::Null)
+            }
             Operation::UpdateStatus => encoded(self.service.updater.status()?),
             Operation::CheckUpdate => encoded(self.service.updater.check()?),
             Operation::DownloadUpdate => encoded(self.service.updater.download()?),
@@ -284,8 +288,7 @@ impl CoreSession {
                     .list(&args.query, args.kind)?
                     .into_iter()
                     .filter(|e| {
-                        args.group.as_ref().is_none_or(|g| e.tags.contains(g))
-                            && args.tag.as_ref().is_none_or(|t| e.tags.contains(t))
+                        args.tag.as_ref().is_none_or(|t| e.tags.contains(t))
                     })
                     .collect();
                 Ok(json!({"entries":entries,"hasMore":false}))
@@ -425,9 +428,6 @@ impl CoreSession {
             Operation::Write(args) => {
                 self.service.filling.write(storage, &self.service.windows, args)
             }
-            Operation::Fill(args) => {
-                self.service.filling.fill(storage, &self.service.windows, args)
-            }
         };
         if is_mcp {
             let mut guard = self.guard.write().map_err(|_| AppError::storage())?;
@@ -454,7 +454,7 @@ impl CoreSession {
     }
 }
 
-// Normalize only product-owned path segments. Windows resolves legacy casing;
+// Normalize product-owned path segments for generated configuration;
 // unrelated custom directory names retain exactly the user's chosen spelling.
 fn configuration_path(path: &Path) -> std::path::PathBuf {
     path.components().map(|component| {

@@ -14,7 +14,6 @@ pub struct Search {
     #[serde(default)]
     pub query: String,
     pub kind: Option<Kind>,
-    pub group: Option<String>,
     pub tag: Option<String>,
 }
 impl Search {
@@ -22,7 +21,6 @@ impl Search {
         Self {
             query,
             kind,
-            group: None,
             tag: None,
         }
     }
@@ -35,15 +33,6 @@ pub struct FieldRequest {
     pub field: String,
     pub service_id: Option<String>,
 }
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct FillRequest {
-    pub credential_id: String,
-    pub field: String,
-    pub service_id: Option<String>,
-    pub target_id: String,
-}
-
 pub enum Operation {
     UpdateStatus,
     CheckUpdate,
@@ -79,6 +68,7 @@ pub enum Operation {
     ReadField(FieldRequest),
     CopyField(FieldRequest),
     CopyText(String),
+    OpenUrl(String),
     Settings,
     SaveSettings(Settings),
     PermissionPreview(Settings),
@@ -89,5 +79,4 @@ pub enum Operation {
     },
     CaptureTarget(CaptureRequest),
     Write(WriteArgs),
-    Fill(FillRequest),
 }

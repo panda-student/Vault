@@ -14,7 +14,7 @@ const run=promisify(execFile),sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const root=await realpath(await mkdtemp(join(tmpdir(),'vault-installer-handoff-')));
 const folder=join(root,'custom install','vault'),data=join(root,'custom data'),executable=join(folder,'vault.exe');
 await mkdir(folder,{recursive:true});
-await copyFile(resolve(process.env.VAULT_OLD_EXE||'artifacts/github-release-0.5.5/unpacked/vault-0.5.5/Vault.exe'),executable);
+await copyFile(resolve(process.env.VAULT_OLD_EXE||process.env.VAULT_HELPER_EXE||'src-tauri/target/release/local-password-manager.exe'),executable);
 const helper=resolve(process.env.VAULT_HELPER_EXE||'src-tauri/target/debug/local-password-manager.exe');
 const expectedPayloadHash=createHash('sha256').update(await readFile(helper)).digest('hex');
 const oldHash=createHash('sha256').update(await readFile(executable)).digest('hex');

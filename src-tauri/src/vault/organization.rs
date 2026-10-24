@@ -3,7 +3,6 @@ use super::*;
 const CATALOG: &str = "organization-v1";
 #[derive(Default, Serialize, Deserialize)]
 pub struct Organization {
-    pub groups: Vec<String>,
     pub tags: Vec<String>,
 }
 
@@ -21,7 +20,6 @@ impl Vault {
             }
             None => Organization::default(),
         };
-        catalog.tags.append(&mut catalog.groups);
         let mut query = c.prepare(&format!(
             "SELECT {COLUMNS} FROM entries UNION ALL SELECT {COLUMNS} FROM trash"
         ))?;
@@ -45,7 +43,7 @@ impl Vault {
     pub fn organize(&self, kind: &str, name: &str, previous: Option<&str>) -> Result<()> {
         let name = name.trim();
         let deleting = name.is_empty() && previous.is_some();
-        if !["tag", "group"].contains(&kind) || (!deleting && name.is_empty()) || name.len() > 256 {
+        if kind != "tag" || (!deleting && name.is_empty()) || name.len() > 256 {
             return Err(AppError::invalid());
         }
         let mut c = self.connection()?;
@@ -113,7 +111,7 @@ mod tests {
     use super::*;
     fn database() -> EntryInput {
         serde_json::from_value(serde_json::json!({
-            "kind":"database","title":"orders","group":"orders-system","tags":["UVT"],
+            "kind":"database","title":"orders","tags":["orders-system","UVT"],
             "database":{"databaseType":"Oracle","host":"fixture.invalid","port":"1521","databaseName":"ORCL"},
             "secret":"","account":"fixture"
         })).unwrap()
@@ -122,12 +120,12 @@ mod tests {
     fn database_organization_and_renames_persist_including_trash() {
         let dir = tempfile::tempdir().unwrap();
         let vault = Vault::open(dir.path()).unwrap();
-        vault.organize("group", "empty-group", None).unwrap();
+        vault.organize("tag", "empty-tag", None).unwrap();
         let a = vault.create(database()).unwrap();
         let b = vault.create(database()).unwrap();
         vault.delete(&b.id, b.revision).unwrap();
         vault
-            .organize("group", "renamed-system", Some("orders-system"))
+            .organize("tag", "renamed-system", Some("orders-system"))
             .unwrap();
         vault.organize("tag", "staging", Some("UVT")).unwrap();
         assert!(
@@ -154,7 +152,7 @@ mod tests {
                 .organization()
                 .unwrap()
                 .tags
-                .contains(&"empty-group".into())
+                .contains(&"empty-tag".into())
         );
         assert_eq!(reopened.get(&a.id).unwrap().secret, "");
         let bytes = std::fs::read(dir.path().join("vault.db")).unwrap();
@@ -171,9 +169,9 @@ mod tests {
         let mut value = database();
         value.database.as_mut().unwrap().port = "65536".into();
         assert!(vault.create(value).is_err());
-        vault.organize("group", "one", None).unwrap();
-        vault.organize("group", "two", None).unwrap();
-        assert!(vault.organize("group", "two", Some("one")).is_err());
+        vault.organize("tag", "one", None).unwrap();
+        vault.organize("tag", "two", None).unwrap();
+        assert!(vault.organize("tag", "two", Some("one")).is_err());
         assert!(vault.organization().unwrap().tags.contains(&"one".into()));
     }
 }

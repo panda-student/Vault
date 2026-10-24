@@ -1,5 +1,3 @@
-#[cfg(test)]
-mod migration_tests;
 mod organization;
 mod policy;
 pub use organization::Organization;
@@ -46,11 +44,11 @@ impl Row {
             id: self.id.clone(),
             kind: value.kind,
             title: value.title.clone(),
-            group: value.group.clone(),
             tags: value.tags.clone(),
             database: value.database.clone(),
             account: value.account.clone(),
             url: value.url.clone(),
+            documentation_url: value.documentation_url.clone(),
             services: value.services.clone(),
             notes: value.notes.clone(),
             pinned: self.pinned,
@@ -100,6 +98,14 @@ impl Vault {
                 "已有密码库为空或不完整，请保留原文件并检查备份。",
             ));
         }
+        // Reject other formats before changing journal mode or opening a write transaction.
+        if existed {
+            let inspection = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+            let version: i64 = inspection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+            if version != 4 {
+                return Err(AppError::new("UNSUPPORTED_DATABASE", "仅支持当前密码库格式，原文件未被修改。"));
+            }
+        }
         let mut connection = Connection::open(&path)?;
         connection.busy_timeout(Duration::from_secs(5))?;
         // Only encrypted content reaches SQLite, including its WAL and free pages.
@@ -120,7 +126,7 @@ impl Vault {
                     "该文件不是本应用的密码库，未进行初始化。",
                 ));
             }
-            transaction.execute_batch("CREATE TABLE metadata (name TEXT PRIMARY KEY, value BLOB NOT NULL); CREATE TABLE entries (id TEXT PRIMARY KEY, encrypted BLOB NOT NULL, revision INTEGER NOT NULL, pinned INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL); PRAGMA user_version=1;")?;
+            transaction.execute_batch("CREATE TABLE metadata (name TEXT PRIMARY KEY, value BLOB NOT NULL); CREATE TABLE entries (id TEXT PRIMARY KEY, encrypted BLOB NOT NULL, revision INTEGER NOT NULL, pinned INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL); CREATE TABLE trash (id TEXT PRIMARY KEY, encrypted BLOB NOT NULL, revision INTEGER NOT NULL, pinned INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER NOT NULL); PRAGMA user_version=4;")?;
             let key = Zeroizing::new(crypto::random::<32>()?.to_vec());
             let wrapped = crypto::protect(&key)?;
             transaction.execute(
@@ -140,7 +146,7 @@ impl Vault {
             )?;
             key
         } else {
-            if version != 1 && version != 2 && version != 3 {
+            if version != 4 {
                 return Err(AppError::new(
                     "UNSUPPORTED_DATABASE",
                     "密码库格式不受支持，原文件未被覆盖。",
@@ -165,22 +171,8 @@ impl Vault {
             }
             key
         };
-        transaction.execute_batch("CREATE TABLE IF NOT EXISTS trash (id TEXT PRIMARY KEY, encrypted BLOB NOT NULL, revision INTEGER NOT NULL, pinned INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER NOT NULL);")?;
-        if version < 2 {
-            transaction.execute_batch("PRAGMA user_version=2;")?;
-        }
         transaction.commit()?;
-        if existed && version < 3 {
-            let backups = directory.join("backups");
-            std::fs::create_dir_all(&backups).map_err(|_| AppError::storage())?;
-            let backup = backups.join(format!(
-                "before-tags-permissions-{}.db",
-                uuid::Uuid::new_v4()
-            ));
-            connection.execute("VACUUM INTO ?1", [backup.to_string_lossy().as_ref()])?;
-        }
         let vault = Self { directory, key };
-        vault.migrate_labels()?;
         Ok(vault)
     }
 
@@ -226,22 +218,7 @@ impl Vault {
     }
     fn decode(&self, row: &Row) -> Result<EntryInput> {
         let plaintext = crypto::decrypt(&self.key, &row.aad(), &row.packed)?;
-        let mut value: EntryInput =
-            serde_json::from_slice(&plaintext).map_err(|_| AppError::corrupt())?;
-        if value.kind == Kind::Api && value.services.is_empty() && !value.url.is_empty() {
-            value.services.push(ApiService {
-                id: "legacy".into(),
-                protocol: ApiProtocol::Custom,
-                url: value.url.clone(),
-            });
-        }
-        for service in &mut value.services {
-            if matches!(service.protocol, ApiProtocol::Figma | ApiProtocol::Gitea) {
-                service.protocol = ApiProtocol::Custom;
-            }
-        }
-        Self::normalize_labels(&mut value);
-        Ok(value)
+        serde_json::from_slice(&plaintext).map_err(|_| AppError::corrupt())
     }
     fn encode(&self, row: &Row, value: &EntryInput) -> Result<Vec<u8>> {
         let plaintext = Zeroizing::new(serde_json::to_vec(value).map_err(|_| AppError::invalid())?);
@@ -249,18 +226,10 @@ impl Vault {
     }
     fn normalize_services(value: &mut EntryInput) -> Result<()> {
         Self::normalize_labels(value);
-        value.group = value.group.trim().into();
         value.tags = value.tags.iter().map(|t| t.trim().to_string()).collect();
         let mut tags = std::collections::HashSet::new();
         value.tags.retain(|t| tags.insert(t.clone()));
         if value.kind == Kind::Api {
-            if value.services.is_empty() && !value.url.is_empty() {
-                value.services.push(ApiService {
-                    id: "legacy".into(),
-                    protocol: ApiProtocol::Custom,
-                    url: value.url.clone(),
-                });
-            }
             for service in &mut value.services {
                 service.url = service.url.trim().into();
                 if service.id.is_empty() {
@@ -297,9 +266,6 @@ impl Vault {
         Ok(())
     }
     fn validate(value: &EntryInput) -> Result<()> {
-        if value.group.len() > 256 {
-            return Err(AppError::invalid().with("group", "分组长度不能超过 256。"));
-        }
         if value.tags.len() > 64 {
             return Err(AppError::invalid().with("tags", "标签数量不能超过 64 个。"));
         }
@@ -348,6 +314,9 @@ impl Vault {
         if value.account.len() > 4096 {
             return Err(AppError::invalid().with("account", "账号长度不能超过 4096。"));
         }
+        if value.documentation_url.len() > 8192 {
+            return Err(AppError::invalid().with("documentationUrl", "文档地址长度不能超过 8192。"));
+        }
         if value.url.len() > 8192 {
             return Err(AppError::invalid().with("url", "网址长度不能超过 8192。"));
         }
@@ -385,7 +354,7 @@ impl Vault {
             let row = row?;
             let value = self.decode(&row)?;
             if kind.is_none_or(|k| k == value.kind)
-                && ([&value.title, &value.account, &value.url, &value.group]
+                && ([&value.title, &value.account, &value.url, &value.documentation_url]
                     .iter()
                     .any(|s| s.to_lowercase().contains(&query))
                     || value.tags.iter().any(|s| s.to_lowercase().contains(&query))
@@ -450,7 +419,7 @@ impl Vault {
     ) -> Result<Vec<EntrySummary>> {
         self.write_many(values, |connection, mut value| {
         value.title = value.title.trim().into();
-        if value.kind == Kind::Api && !value.url.is_empty() && value.services.first().is_some_and(|first| first.url.trim()!=value.url.trim()) {
+        if value.kind == Kind::Api && !value.url.is_empty() && value.services.first().is_none_or(|first| first.url.trim()!=value.url.trim()) {
             return Err(AppError::invalid().with("url", "API 凭据的 url 必须与第一个服务地址一致。"));
         }
         Self::normalize_services(&mut value)?;
@@ -498,14 +467,14 @@ impl Vault {
             if let Some(v) = patch.title {
                 value.title = v.trim().into();
             }
-            if let Some(v) = patch.group {
-                value.group = v.trim().into();
-            }
             if let Some(v) = patch.tags {
                 value.tags = v;
             }
             if let Some(v) = patch.database {
                 value.database = Some(v);
+            }
+            if let Some(v) = patch.documentation_url {
+                value.documentation_url = v;
             }
             if let Some(v) = patch.account {
                 value.account = v;
@@ -523,11 +492,7 @@ impl Vault {
                 value.url.clear();
             } else if let Some(v) = patch.url {
                 if value.kind == Kind::Api {
-                    if v.trim().is_empty() && !value.services.is_empty() {
-                        value.services.remove(0);
-                    } else if let Some(first) = value.services.first_mut() {
-                        first.url = v.clone();
-                    }
+                    return Err(AppError::invalid().with("services", "API 服务地址请通过 services 修改。"));
                 }
                 value.url = v;
             }
@@ -633,30 +598,41 @@ impl Vault {
 mod tests {
     use super::*;
     #[test]
-    fn legacy_and_multiple_service_addresses_roundtrip_without_losing_secret() {
+    fn only_current_database_format_is_opened_without_rewriting_old_files() {
+        for version in [0, 1, 2, 3, 5] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("vault.db");
+            let db = Connection::open(&path).unwrap();
+            db.execute_batch(&format!("CREATE TABLE sentinel(value TEXT); INSERT INTO sentinel VALUES ('keep'); PRAGMA user_version={version};")).unwrap();
+            drop(db);
+            let before = std::fs::read(&path).unwrap();
+            assert_eq!(Vault::open(dir.path()).err().unwrap().code, "UNSUPPORTED_DATABASE");
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+            assert!(!dir.path().join("backups").exists());
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Vault::open(dir.path()).unwrap();
+        assert_eq!(vault.connection().unwrap().query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), 4);
+        assert!(!dir.path().join("backups").exists());
+    }
+    #[test]
+    fn obsolete_group_protocol_and_api_url_inputs_are_rejected() {
+        let mut old = serde_json::to_value(value()).unwrap();
+        old["group"] = serde_json::json!("removed");
+        assert!(serde_json::from_value::<EntryInput>(old).is_err());
+        assert!(serde_json::from_str::<ApiProtocol>("\"figma\"").is_err());
+        assert!(serde_json::from_str::<ApiProtocol>("\"gitea\"").is_err());
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Vault::open(dir.path()).unwrap();
+        let mut input = value(); input.services.clear();
+        assert!(vault.create(input).is_err());
+        assert!(serde_json::from_str::<Settings>(r#"{"mcpEnabled":true,"closeToTray":false}"#).is_err());
+    }
+    #[test]
+    fn multiple_service_addresses_roundtrip_without_losing_secret() {
         let dir = tempfile::tempdir().unwrap();
         let vault = Vault::open(dir.path()).unwrap();
         let entry = vault.create(value()).unwrap();
-        let connection = vault.connection().unwrap();
-        let row = Vault::find(&connection, &entry.id).unwrap();
-        let mut old_json = serde_json::to_value(value()).unwrap();
-        old_json.as_object_mut().unwrap().remove("services");
-        let packed = crypto::encrypt(
-            &vault.key,
-            &row.aad(),
-            &serde_json::to_vec(&old_json).unwrap(),
-        )
-        .unwrap();
-        connection
-            .execute(
-                "UPDATE entries SET encrypted=?1 WHERE id=?2",
-                params![packed, entry.id],
-            )
-            .unwrap();
-        assert_eq!(
-            vault.get(&entry.id).unwrap().summary.services[0].id,
-            "legacy"
-        );
         let patch: EntryPatch = serde_json::from_value(serde_json::json!({"id":entry.id,"expectedRevision":1,"services":[{"protocol":"openai","url":"https://first-protocol-fixture.invalid/v1"},{"protocol":"gemini","url":"https://second-protocol-fixture.invalid/v1beta"}]})).unwrap();
         let updated = vault.update(patch).unwrap();
         assert_eq!(updated.services.len(), 2);
@@ -668,9 +644,6 @@ mod tests {
             updated.service(Some(&second_id)).unwrap().protocol,
             ApiProtocol::Gemini
         );
-        let patch:EntryPatch=serde_json::from_value(serde_json::json!({"id":entry.id,"expectedRevision":2,"url":"https://updated-first-fixture.invalid/v1"})).unwrap();
-        vault.update(patch).unwrap();
-        drop(connection);
         drop(vault);
         let vault = Vault::open(dir.path()).unwrap();
         let current = vault.get(&entry.id).unwrap();
@@ -678,7 +651,7 @@ mod tests {
         assert_eq!(current.summary.services[1].id, second_id);
         assert_eq!(
             current.summary.services[0].url,
-            "https://updated-first-fixture.invalid/v1"
+            "https://first-protocol-fixture.invalid/v1"
         );
         let bytes = std::fs::read(dir.path().join("vault.db")).unwrap();
         assert!(
@@ -687,7 +660,7 @@ mod tests {
                 .any(|w| w == b"second-protocol-fixture")
         );
         let patch: EntryPatch = serde_json::from_value(
-            serde_json::json!({"id":entry.id,"expectedRevision":3,"services":[]}),
+            serde_json::json!({"id":entry.id,"expectedRevision":2,"services":[]}),
         )
         .unwrap();
         let cleared = vault.update(patch).unwrap();
@@ -826,14 +799,14 @@ mod tests {
     }
     fn value() -> EntryInput {
         EntryInput {
-            group: String::new(),
             tags: vec![],
             database: None,
             kind: Kind::Api,
             title: "fixture-private-title".into(),
             account: "fixture-account".into(),
             url: "https://fixture.example.com".into(),
-            services: Vec::new(),
+            documentation_url: String::new(),
+            services: vec![ApiService { id: String::new(), protocol: ApiProtocol::Custom, url: "https://fixture.example.com".into() }],
             secret: "fixture-secret-DO-NOT-LEAK".into(),
             notes: "fixture-private-notes".into(),
         }

@@ -216,6 +216,11 @@ fn copy_field(
     }))
 }
 #[tauri::command]
+fn open_url(state: tauri::State<'_, AppState>, url: String) -> Result<()> {
+    state.core.execute(Operation::OpenUrl(url))?;
+    Ok(())
+}
+#[tauri::command]
 fn copy_text(state: tauri::State<'_, AppState>, text: String) -> Result<()> {
     state.core.call(Operation::CopyText(text))
 }
@@ -417,6 +422,7 @@ fn desktop(
             read_secret,
             copy_field,
             copy_text,
+            open_url,
             save_settings,
             permission_preview,
             set_startup,
@@ -538,7 +544,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         return core::apply_update(&PathBuf::from(&bootstrap_args[1])).map_err(Into::into);
     }
     let mut is_mcp = false;
-    let mut mcp_service = false;
+    let mut backend_mode = false;
     let mut directory = None;
     let mut report = None;
     let mut background = false;
@@ -557,7 +563,7 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 update_health = Some((path, token));
             }
             Some("--mcp") => is_mcp = true,
-            Some("--mcp-service") => { is_mcp = true; mcp_service = true; }
+            Some("--backend") => { is_mcp = true; backend_mode = true; }
             Some("--data-dir") => {
                 directory = Some(PathBuf::from(
                     args.next().ok_or("--data-dir requires a path")?,
@@ -618,16 +624,16 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     if is_mcp && (report.is_some() || background) {
         return Err("MCP cannot be combined with desktop arguments".into());
     }
-    if is_mcp && !mcp_service {
+    if is_mcp && !backend_mode {
         return mcp_bridge::run(&executable, &directory);
     }
-    // A legacy --mcp-service launcher now starts the same desktop-capable host.
+    // MCP bridges start the same desktop-capable backend without a WebView.
     // Identity remains bound by the host, never by a protocol field.
     let Some(backend) = backend::Host::acquire(&executable, &directory)? else {
         if report.is_some() || update_health.is_some() {
             return Err("An isolated test or update launch found an existing backend".into());
         }
-        return backend::activate(&executable, &directory, background || mcp_service);
+        return backend::activate(&executable, &directory, background || backend_mode);
     };
     let runtime = core::UpdateRuntime::acquire(&executable)?;
     let core = core::open(&directory, false)?;
@@ -642,13 +648,13 @@ fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
             backend,
         },
         background,
-        mcp_service,
+        backend_mode,
     )
 }
 fn main() {
     let installer = std::env::args_os().nth(1).is_some_and(|arg|arg=="--installer-replace");
     let health_probe = std::env::args_os().any(|arg|arg=="--update-health");
-    let is_mcp = std::env::args_os().any(|arg| arg == "--mcp" || arg == "--mcp-service");
+    let is_mcp = std::env::args_os().any(|arg| arg == "--mcp" || arg == "--backend");
     if is_mcp {
         std::panic::set_hook(Box::new(|_| eprintln!("Local credential service failed")));
     }

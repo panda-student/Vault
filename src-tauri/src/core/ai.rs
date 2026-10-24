@@ -11,7 +11,7 @@ pub(super) fn metadata(
     let summary = core.summary(id)?;
     crate::ai_output::scrub(
         guard,
-        json!({"id":summary.id,"kind":summary.kind,"title":summary.title,"account":summary.account,"url":summary.url,"services":summary.services,"group":summary.group,"tags":summary.tags,"database":summary.database,"revision":summary.revision,"pinned":summary.pinned,"createdAt":summary.created_at,"updatedAt":summary.updated_at}),
+        json!({"id":summary.id,"kind":summary.kind,"title":summary.title,"account":summary.account,"url":summary.url,"documentationUrl":summary.documentation_url,"services":summary.services,"tags":summary.tags,"database":summary.database,"revision":summary.revision,"pinned":summary.pinned,"createdAt":summary.created_at,"updatedAt":summary.updated_at}),
     )
 }
 pub(super) fn search(
@@ -35,11 +35,7 @@ pub(super) fn search(
             continue;
         }
         let item = metadata(core, guard, &summary.id)?;
-        if args.group.as_ref().is_some_and(|group| {
-            !item["tags"]
-                .as_array()
-                .is_some_and(|tags| tags.iter().any(|t| t.as_str() == Some(group.as_str())))
-        }) || args.tag.as_ref().is_some_and(|tag| {
+        if args.tag.as_ref().is_some_and(|tag| {
             !item["tags"]
                 .as_array()
                 .is_some_and(|tags| tags.iter().any(|t| t.as_str() == Some(tag.as_str())))
@@ -49,7 +45,7 @@ pub(super) fn search(
         // Searching redacted fields would become an oracle for secrets
         // accidentally placed in names, accounts or URLs.
         if query.is_empty()
-            || ["title", "account", "url", "group"].iter().any(|field| {
+            || ["title", "account", "url", "documentationUrl"].iter().any(|field| {
                 item[*field]
                     .as_str()
                     .is_some_and(|v| v.to_lowercase().contains(&query))

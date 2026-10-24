@@ -250,14 +250,6 @@ impl PermissionService {
                     Err(denied())
                 }
             }
-            Operation::Fill(args) => {
-                let e = storage.summary(&args.credential_id)?;
-                if permitted(s, Some(&e.id), &e.tags, a) {
-                    Ok(())
-                } else {
-                    Err(denied())
-                }
-            }
             Operation::Pin { id, .. } => {
                 let e = storage.summary(id)?;
                 if permitted(s, Some(&e.id), &e.tags, a) {
@@ -353,7 +345,7 @@ pub(super) fn access(op: &Operation) -> Access {
                 Access::Input
             }
         }
-        Operation::Fill(_) | Operation::CaptureTarget(_) => Access::Input,
+        Operation::CaptureTarget(_) => Access::Input,
         _ => Access::DesktopOnly,
     }
 }
@@ -364,7 +356,7 @@ pub(super) fn tool_access(name: &str, _s: &Settings) -> Option<Access> {
         "create_entries" => Access::Create,
         "update_entries" | "restore_entries" | "pin_entries" | "organize" => Access::Update,
         "delete_entries" => Access::Delete,
-        "capture_fill_target" | "fill_credential" | "write_credential" => Access::Input,
+        "capture_fill_target" | "write_credential" => Access::Input,
         _ => return None,
     })
 }

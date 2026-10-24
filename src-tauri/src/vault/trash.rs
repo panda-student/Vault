@@ -73,36 +73,9 @@ impl Vault {
         if actual != expected {
             return Err(AppError::conflict());
         }
-        // Erase retired secrets owned by these entries as well as legacy records
-        // matching their current secret. Remaining legacy history is anonymous and
-        // cannot safely be attributed to a particular entry.
-        let secrets: Zeroizing<Vec<String>> = {
-            let mut statement = tx.prepare(&format!("SELECT {COLUMNS} FROM trash"))?;
-            let mut values = Zeroizing::new(Vec::new());
-            for row in statement.query_map([], from_sql)? {
-                values.push(self.decode(&row?)?.secret);
-            }
-            values
-        };
-        let retired: Vec<(String, Vec<u8>)> = {
-            let mut statement =
-                tx.prepare("SELECT name,value FROM metadata WHERE name GLOB 'retired_secret:*'")?;
-            statement
-                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
-                .collect::<std::result::Result<_, _>>()?
-        };
-        for (name, packed) in retired {
-            let owned = actual
-                .iter()
-                .any(|(id, _)| name.starts_with(&format!("retired_secret:{id}:")));
-            let value = crypto::decrypt(&self.key, name.as_bytes(), &packed)?;
-            if owned
-                || secrets
-                    .iter()
-                    .any(|secret| secret.as_bytes() == value.as_slice())
-            {
-                tx.execute("DELETE FROM metadata WHERE name=?1", [name])?;
-            }
+        // Retired values use entry-owned keys in the current format.
+        for (id, _) in &actual {
+            tx.execute("DELETE FROM metadata WHERE name GLOB ?1", [format!("retired_secret:{id}:*")])?;
         }
         let count = tx.execute("DELETE FROM trash", [])?;
         tx.commit()?;

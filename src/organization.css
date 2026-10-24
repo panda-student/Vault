@@ -14,8 +14,8 @@
 .list-filters select{width:100%;height:32px;border:1px solid #dce1eb;border-radius:6px;background:white;color:#596375}
 .chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;min-width:0}
 .chip{font-size:10px;color:#53648c;background:#edf0fa;border:0;border-radius:4px;padding:3px 6px;overflow-wrap:anywhere;max-width:100%}
-.group-heading{display:flex;align-items:center;margin-top:10px;gap:3px}
-.group-toggle{flex:1;min-width:0;text-align:left;overflow-wrap:anywhere}
+
+
 .entry-select{padding:12px 8px;gap:8px}
 .entry-select .logo{width:29px;height:29px;font-size:11px}
 .entry-text small{margin-top:5px}
@@ -23,7 +23,7 @@
 .detail-toolbar .secondary{font-size:11px;padding:6px 9px}
 .inline-editor select{width:100%}
 .host-fields{display:grid;grid-template-columns:minmax(0,1fr) 85px;gap:12px}
-.service-controls{grid-template-columns:110px minmax(0,1fr) 30px 30px}
+.service-controls{grid-template-columns:110px minmax(0,1fr) 30px 30px 30px}
 .trash-panel{max-width:none}
 .trash-heading{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:24px}
 .trash-heading button{flex-shrink:0}
@@ -35,6 +35,6 @@
 @media(max-width:1000px){
   .sidebar{width:158px;padding:18px 7px}.list-pane{width:236px}
   .local-label{font-size:10px}.local-label small{font-size:9px}
-  .service-controls{grid-template-columns:96px minmax(0,1fr) 28px 28px}
+  .service-controls{grid-template-columns:96px minmax(0,1fr) 28px 28px 28px}
   .identity-fields{grid-template-columns:1fr 1fr;gap:10px}
 }

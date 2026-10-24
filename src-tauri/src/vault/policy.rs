@@ -56,10 +56,6 @@ impl Vault {
         Ok(())
     }
     pub(super) fn normalize_labels(value: &mut EntryInput) {
-        if !value.group.trim().is_empty() {
-            value.tags.push(value.group.trim().into());
-            value.group.clear();
-        }
         value.tags = value
             .tags
             .iter()
@@ -68,48 +64,5 @@ impl Vault {
             .collect();
         let mut seen = std::collections::HashSet::new();
         value.tags.retain(|t| seen.insert(t.clone()));
-    }
-    pub(super) fn migrate_labels(&self) -> Result<()> {
-        let mut c = self.connection()?;
-        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        // Idempotent, encrypted, lossless migration. Also handles a legacy process
-        // writing an old record after the initial upgrade.
-        for table in ["entries", "trash"] {
-            let rows: Vec<Row> = {
-                let mut q = tx.prepare(&format!("SELECT {COLUMNS} FROM {table}"))?;
-                q.query_map([], from_sql)?
-                    .collect::<std::result::Result<_, _>>()?
-            };
-            for mut row in rows {
-                let plaintext = crypto::decrypt(&self.key, &row.aad(), &row.packed)?;
-                let mut value: EntryInput =
-                    serde_json::from_slice(&plaintext).map_err(|_| AppError::corrupt())?;
-                if value.group.trim().is_empty() {
-                    continue;
-                }
-                Self::normalize_labels(&mut value);
-                row.revision += 1;
-                row.updated_at = now();
-                tx.execute(
-                    &format!(
-                        "UPDATE {table} SET encrypted=?1,revision=?2,updated_at=?3 WHERE id=?4"
-                    ),
-                    params![
-                        self.encode(&row, &value)?,
-                        row.revision,
-                        row.updated_at,
-                        row.id
-                    ],
-                )?;
-            }
-        }
-        let mut catalog = self.organization_on(&tx)?;
-        catalog.tags.append(&mut catalog.groups);
-        catalog.tags.sort();
-        catalog.tags.dedup();
-        self.save_catalog_on(&tx, &catalog)?;
-        tx.execute_batch("PRAGMA user_version=3;")?;
-        tx.commit()?;
-        Ok(())
     }
 }

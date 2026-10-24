@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type {UnwrapRef} from 'vue';import type {VaultUI} from '../useVault';import {kindName} from '../useVault';
-const props=defineProps<{v:UnwrapRef<VaultUI>}>();defineEmits<{organize:[kind:'group'|'tag',previous?:string]}>();
+const props=defineProps<{v:UnwrapRef<VaultUI>}>();defineEmits<{organize:[kind:'tag',previous?:string]}>();
 </script>
 <template>
   <section class="list-pane">

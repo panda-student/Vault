@@ -17,11 +17,11 @@ await new Promise(resolve => portProbe.close(resolve));
 const client = new Client({ name: 'isolated-ui-fixture', version: '1.0.0' }, { capabilities: {} });
 await client.connect(new StdioClientTransport({ command: executable, args: ['--mcp', '--data-dir', directory], stderr: 'pipe' }));
 await client.callTool({name:'create_entries',arguments:{items:[
- {kind:'database',title:'订单数据库 · 测试',group:'订单系统',tags:['测试'],database:{databaseType:'MySQL',host:'db-test.example',port:'3306',databaseName:'orders'},account:'orders_test',secret},
- {kind:'database',title:'订单数据库 · UVT',group:'订单系统',tags:['UVT'],database:{databaseType:'Oracle',host:'db-uvt.example',port:'1521',databaseName:'ORCL'},account:'orders_uvt',secret},
- {kind:'password',title:'GitHub · 个人',group:'GitHub',tags:['个人'],account:'alex.personal@example.com',url:'https://github.com',secret},
- {kind:'password',title:'GitHub · 工作',group:'GitHub',tags:['工作'],account:'alex.work@example.com',url:'https://github.com',secret},
- {kind:'api',title:'模型服务',group:'内部平台',tags:['工作'],secret,services:[{protocol:'openai',url:'https://api.example/v1'},{protocol:'anthropic',url:'https://anthropic.example'}]}
+ {kind:'database',title:'订单数据库 · 测试',tags:['订单系统','测试'],database:{databaseType:'MySQL',host:'db-test.example',port:'3306',databaseName:'orders'},account:'orders_test',secret},
+ {kind:'database',title:'订单数据库 · UVT',tags:['订单系统','UVT'],database:{databaseType:'Oracle',host:'db-uvt.example',port:'1521',databaseName:'ORCL'},account:'orders_uvt',secret},
+ {kind:'password',title:'GitHub · 个人',tags:['GitHub','个人'],account:'alex.personal@example.com',url:'https://github.com',secret},
+ {kind:'password',title:'GitHub · 工作',tags:['GitHub','工作'],account:'alex.work@example.com',url:'https://github.com',secret},
+ {kind:'api',title:'模型服务',tags:['内部平台','工作'],secret,services:[{protocol:'openai',url:'https://api.example/v1'},{protocol:'anthropic',url:'https://anthropic.example'}]}
 ]}});
 await client.close();
 const desktop = spawn(executable, ['--data-dir', directory], { windowsHide: true, stdio: 'ignore', env: { ...process.env, VAULT_UI_DEBUG_PORT: String(port), WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` } });

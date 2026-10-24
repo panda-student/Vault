@@ -27,16 +27,16 @@ try{
  const launch=config.value.mcpServers?.vault;
  check('mcp-config-name-and-current-path',!config.failed&&launch&&await realpath(launch.command)===await realpath(executable)&&launch.args[0]==='--mcp'&&launch.args[1]==='--data-dir'&&await realpath(launch.args[2])===await realpath(data));
  const tools=(await client.listTools()).tools;
- check('twelve-tools-no-network-or-purge',tools.length===12&&!tools.some(t=>/execute_api|trash|purge/.test(t.name)));
+ check('eleven-tools-no-network-or-purge',tools.length===11&&!tools.some(t=>/execute_api|trash|purge/.test(t.name)));
  const created=await call('create_entries',{items:[
-  {kind:'database',title:'MCP DB UVT',group:'MCP System',tags:['UVT'],database:{databaseType:'Oracle',host:'db-next.invalid',port:'1521',databaseName:'ORCL'},secret},
+  {kind:'database',title:'MCP DB UVT',tags:['MCP System','UVT'],database:{databaseType:'Oracle',host:'db-next.invalid',port:'1521',databaseName:'ORCL'},secret},
   {kind:'database',title:'MCP DB Local',database:{databaseType:'Redis',host:'127.0.0.1',port:'6379',databaseName:'0'},secret:''},
   {kind:'api',title:'MCP API',services:[{protocol:'openai',url:'https://one.invalid/v1'},{protocol:'anthropic',url:'https://two.invalid'}],secret}
  ]});
  check('batch-create-database-and-api',!created.failed&&created.value.results.length===3);
  const [db,local,api]=created.value.results;
  const meta=await call('get_entries',{id:db.id});
- check('metadata-shows-group-tags-database-not-secret',!meta.failed&&meta.value.tags.includes('MCP System')&&meta.value.database.databaseName==='ORCL'&&!('secret' in meta.value)&&!('notes' in meta.value));
+ check('metadata-shows-tags-database-not-secret',!meta.failed&&meta.value.tags.includes('MCP System')&&meta.value.database.databaseName==='ORCL'&&!('secret' in meta.value)&&!('notes' in meta.value));
  for(const query of ['MCP System','UVT','db-next.invalid']){
   const r=await call('search_entries',{query});check(`search:${query}`,r.value.entries.some(e=>e.id===db.id));
  }
@@ -45,10 +45,10 @@ try{
   const r=await call('write_credential',{credentialId:db.id,field,target:{type:'file',path}});
   check(`local-field-write:${field}`,!r.failed&&(await readFile(path,'utf8'))===expected);
  }
- const poisoned=await call('update_entries',{id:db.id,expectedRevision:1,group:secret,tags:[secret]});
+ const poisoned=await call('update_entries',{id:db.id,expectedRevision:1,tags:[secret]});
  check('metadata-update',!poisoned.failed);
  const guarded=await call('get_entries',{id:db.id});
- check('new-fields-filter-protected-values',guarded.value.group===''&&guarded.value.tags.some(t=>t===null));
+ check('new-fields-filter-protected-values',guarded.value.tags.some(t=>t===null));
  const oracle=await call('search_entries',{query:secret});
  check('redacted-fields-not-search-oracle',oracle.value.entries.length===0);
  const bad=await call('delete_entries',{items:[{id:db.id,expectedRevision:2},{id:api.id,expectedRevision:999}]});

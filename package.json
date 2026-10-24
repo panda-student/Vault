@@ -1,7 +1,7 @@
 {
   "name": "local-password-manager",
   "private": true,
-  "version": "0.5.8",
+  "version": "0.6.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
@@ -13,8 +13,7 @@
     "package:portable": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-portable.ps1",
     "verify:release": "node scripts/verify-package.mjs",
     "verify:integration": "node scripts/verify-next.mjs",
-    "verify:permissions": "node scripts/verify-permissions.mjs",
-    "verify:migration": "node scripts/verify-migration.mjs"
+    "verify:permissions": "node scripts/verify-permissions.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.4",

@@ -20,20 +20,4 @@ impl FillingService {
     ) -> Result<serde_json::Value> {
         write::execute(&storage.vault, windows, args)
     }
-    pub fn fill(
-        &self,
-        storage: &storage::StorageService,
-        windows: &windows::WindowsService,
-        args: FillRequest,
-    ) -> Result<serde_json::Value> {
-        Ok(serde_json::json!(windows.fill_target(
-            &args.target_id,
-            || write::resolve_field(
-                &storage.vault,
-                &args.credential_id,
-                &args.field,
-                args.service_id.as_deref()
-            )
-        )?))
-    }
 }

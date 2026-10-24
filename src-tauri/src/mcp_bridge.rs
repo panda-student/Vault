@@ -98,7 +98,7 @@ impl Worker {
                 if lease.try_lock_exclusive().is_ok() {
                     let mut command = Command::new(executable);
                     command
-                        .arg("--mcp-service")
+                        .arg("--backend")
                         .arg("--data-dir")
                         .arg(directory)
                         .stdin(Stdio::null())

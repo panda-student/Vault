@@ -21,10 +21,10 @@ export async function runSmoke(){
  check('oracle-label',document.body.textContent!.includes('服务名 / SID'));
  await click('#save-entry');await until(()=>!document.querySelector('.draft-state')&&el('#detail-title').textContent==='Smoke Oracle UVT');
  let db=(await entries()).find(e=>e.title==='Smoke Oracle UVT')!;
- check('database-saved-empty-password',!!db&&db.database?.port==='1521'&&db.group===''&&db.tags.includes('Smoke System')&&db.tags.includes('UVT'));
+ check('database-saved-empty-password',!!db&&db.database?.port==='1521'&&db.tags.includes('Smoke System')&&db.tags.includes('UVT'));
  await click('#duplicate-entry');await input('#f-title','Smoke Oracle Test');await click('[aria-label="移除标签 UVT"]');await input('#f-tags','测试');el('#f-tags').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));await tick();await click('#save-entry');await until(()=>el('#detail-title').textContent==='Smoke Oracle Test'&&!document.querySelector('.draft-state'));
  check('environment-copy-independent',(await entries()).filter(e=>e.tags.includes('Smoke System')).length===2);
- await click('[data-tag="UVT"]');check('combined-group-tag-filter',document.querySelectorAll('.item').length===1&&!!document.querySelector(`[data-entry="${db.id}"]`));
+ await click('[data-tag="UVT"]');check('tag-filter',document.querySelectorAll('.item').length===1&&!!document.querySelector(`[data-entry="${db.id}"]`));
  await click('[data-nav="entries"]');await input('#search','db-smoke.invalid');check('host-search',document.querySelectorAll('.item').length===2);await input('#search','');
  await click('[aria-label="重命名标签 Smoke System"]');await input('#organization-name','Smoke Renamed');await click('#organization-dialog button.primary');await until(()=>!el<HTMLDialogElement>('#organization-dialog').open);
  check('rename-updates-entries',(await entries()).filter(e=>e.tags.includes('Smoke Renamed')).length===2);

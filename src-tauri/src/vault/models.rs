@@ -15,8 +15,6 @@ pub enum ApiProtocol {
     Openai,
     Anthropic,
     Gemini,
-    Figma,
-    Gitea,
     Custom,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,8 +58,6 @@ pub struct EntryInput {
     pub kind: Kind,
     pub title: String,
     #[serde(default)]
-    pub group: String,
-    #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
     pub database: Option<DatabaseFields>,
@@ -70,6 +66,8 @@ pub struct EntryInput {
     pub account: String,
     #[serde(default)]
     pub url: String,
+    #[serde(default)]
+    pub documentation_url: String,
     #[serde(default)]
     pub services: Vec<ApiService>,
     pub secret: String,
@@ -83,11 +81,11 @@ pub struct EntryPatch {
     pub id: String,
     pub expected_revision: i64,
     pub title: Option<String>,
-    pub group: Option<String>,
     pub tags: Option<Vec<String>>,
     pub database: Option<DatabaseFields>,
     pub account: Option<String>,
     pub url: Option<String>,
+    pub documentation_url: Option<String>,
     pub services: Option<Vec<ApiService>>,
     pub secret: Option<String>,
     pub notes: Option<String>,
@@ -107,14 +105,14 @@ pub struct EntrySummary {
     pub kind: Kind,
     pub title: String,
     #[serde(default)]
-    pub group: String,
-    #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
     pub database: Option<DatabaseFields>,
 
     pub account: String,
     pub url: String,
+    #[serde(default)]
+    pub documentation_url: String,
     pub services: Vec<ApiService>,
     pub notes: String,
     pub pinned: bool,
@@ -136,17 +134,10 @@ pub struct EntryDetail {
 pub struct Settings {
     pub mcp_enabled: bool,
     pub close_to_tray: bool,
-    #[serde(default)]
     pub mcp_permissions: McpPermissions,
-    #[serde(default = "default_access")]
     pub mcp_access: bool,
-    #[serde(default)]
     pub mcp_tag_rules: std::collections::BTreeMap<String, PermissionRule>,
-    #[serde(default)]
     pub mcp_entry_rules: std::collections::BTreeMap<String, PermissionRule>,
-}
-fn default_access() -> bool {
-    true
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

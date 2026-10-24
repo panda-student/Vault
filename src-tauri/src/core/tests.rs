@@ -6,6 +6,31 @@ fn input(title: &str) -> EntryInput {
     )
     .unwrap()
 }
+
+#[test]
+fn documentation_address_is_separate_persistent_and_patch_compatible() {
+    let directory = tempfile::tempdir().unwrap();
+    let desktop = open(directory.path(), false).unwrap();
+    let mut value = input("documentation fixture");
+    value.kind = Kind::Api;
+    value.services = vec![crate::vault::ApiService { id: String::new(), protocol: crate::vault::ApiProtocol::Openai, url: "https://api.example.invalid/v1".into() }];
+    value.documentation_url = "https://docs.example.invalid/guide".into();
+    let created: Vec<EntrySummary> = desktop.call(Operation::Create(vec![value])).unwrap();
+    let first = &created[0];
+    let patch = serde_json::from_value(json!({"id":first.id,"expectedRevision":first.revision,"title":"renamed"})).unwrap();
+    desktop.execute(Operation::Update(vec![patch])).unwrap();
+    drop(desktop);
+    let desktop = open(directory.path(), false).unwrap();
+    let summary = desktop.service.storage.summary(&first.id).unwrap();
+    assert_eq!(summary.documentation_url, "https://docs.example.invalid/guide");
+    assert_eq!(summary.url, "https://api.example.invalid/v1");
+    let read = desktop.mcp_session().execute(Operation::Read(vec![first.id.clone()])).unwrap();
+    assert!(read.to_string().contains("https://docs.example.invalid/guide"));
+    let patch = serde_json::from_value(json!({"id":summary.id,"expectedRevision":summary.revision,"documentationUrl":""})).unwrap();
+    desktop.execute(Operation::Update(vec![patch])).unwrap();
+    assert!(desktop.service.storage.summary(&first.id).unwrap().documentation_url.is_empty());
+    assert!(input("optional documentation").documentation_url.is_empty());
+}
 fn tagged(title: &str, tags: &[&str]) -> EntryInput {
     let mut v = input(title);
     v.tags = tags.iter().map(|t| t.to_string()).collect();
@@ -593,12 +618,7 @@ fn six_permissions_revoke_live_sessions_and_do_not_restrict_desktop() {
             expected_revision: entry.revision,
         }]),
         Operation::CaptureTarget(CaptureRequest::default()),
-        Operation::Fill(FillRequest {
-            credential_id: entry.id.clone(),
-            field: "secret".into(),
-            service_id: None,
-            target_id: "unused".into(),
-        }),
+        Operation::Write(serde_json::from_value(json!({"credentialId":entry.id,"field":"secret","target":{"type":"input","targetId":"unused"}})).unwrap()),
         write(&entry.id, &dir.path().join("denied.txt")),
     ];
     for op in operations {
@@ -611,7 +631,6 @@ fn six_permissions_revoke_live_sessions_and_do_not_restrict_desktop() {
         "update_entries",
         "delete_entries",
         "capture_fill_target",
-        "fill_credential",
         "write_credential",
     ] {
         assert!(!mcp.tool_allowed(name).unwrap());
@@ -682,17 +701,8 @@ fn file_and_window_permissions_are_independent_and_checked_before_execution() {
     assert!(!dir.path().join("denied.txt").exists());
 }
 #[test]
-fn legacy_settings_preserve_enabled_behavior_and_master_switch_revokes_config() {
-    let old: Settings =
-        serde_json::from_value(json!({"mcpEnabled":true,"closeToTray":false})).unwrap();
-    assert!(
-        old.mcp_permissions.read_metadata
-            && old.mcp_permissions.create
-            && old.mcp_permissions.update
-            && old.mcp_permissions.delete
-            && old.mcp_permissions.fill_input
-            && old.mcp_permissions.write_file
-    );
+fn master_switch_revokes_config() {
+    let old = Settings::default();
     let dir = tempfile::tempdir().unwrap();
     let desktop = open(dir.path(), false).unwrap();
     let mcp = open(dir.path(), true).unwrap();
@@ -809,5 +819,6 @@ fn desktop_and_mcp_sessions_share_one_core_without_sharing_identity() {
     assert!(mcp.mcp_session().caller == permissions::Caller::Mcp);
     assert!(desktop.caller == permissions::Caller::Desktop);
     assert_eq!(mcp.execute(Operation::Settings).unwrap_err().code, "PERMISSION_DENIED");
+    assert_eq!(mcp.execute(Operation::OpenUrl("https://example.com".into())).unwrap_err().code, "PERMISSION_DENIED");
     assert!(desktop.execute(Operation::Settings).is_ok());
 }

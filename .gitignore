@@ -39,7 +39,6 @@
 !/scripts/verify-permissions.mjs
 !/scripts/verify-resource-ui.mjs
 !/scripts/verify-package.mjs
-!/scripts/verify-migration.mjs
 !/scripts/verify-write.mjs
 !/scripts/verify-native-write.ps1
 !/scripts/verify-native-trash.ps1

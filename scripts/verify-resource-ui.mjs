@@ -20,7 +20,7 @@ const call=async(name,args={})=>{const r=await client.callTool({name,arguments:a
 try{
  await client.connect(new StdioClientTransport({command:runtime.executable,args:['--mcp','--data-dir',runtime.directory],stderr:'ignore'}));
  const entries=(await call('search_entries')).value.entries,db=entries.find(e=>e.title==='订单数据库 · UVT');
- check('legacy-group-input-is-tag',db.group===''&&db.tags.includes('订单系统'));
+ check('metadata-uses-tags-only',!('group' in db)&&db.tags.includes('订单系统'));
  check('sidebar-has-only-tags',read('!document.querySelector(".sidebar").textContent.includes("分组")&&!document.querySelector("#f-group")'));
  click('[data-nav="mcp"]');wait('document.querySelectorAll("#permission-matrix tbody tr").length===1');
  check('default-row-only',read('document.querySelector("#customize").getAttribute("aria-expanded")==="false"'));

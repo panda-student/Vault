@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type {UnwrapRef} from 'vue';import type {VaultUI} from '../useVault';
 defineProps<{v:UnwrapRef<VaultUI>}>();
-defineEmits<{organize:[kind:'group'|'tag',previous?:string]}>();
+defineEmits<{organize:[kind:'tag',previous?:string]}>();
 </script>
 <template>
   <aside class="sidebar">
